@@ -1,0 +1,5 @@
+# Codex
+AGENTS.md
+.codex/
+.codex-cache/
+codex*.log
