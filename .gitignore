@@ -4,3 +4,4 @@ AGENTS.md
 .codex-cache/
 codex*.log
 .claude/
+.gitignore
