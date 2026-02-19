@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Cupole manager",
+    "file": "cupole_manager",
+    "extension": "ipf",
+    "fileVersion": "v1.0.0",
+    "releaseTag": "cupole_manager",
+    "unicode": "⛄",
+    "description": "큐폴 관리 애드온. 프리셋을 관리하고 쉽게 적용할 수 있습니다. <br> Cupole manager. You can manage cupole preset and apply them easy",
+    "tags": ["yomae", "cupole", "addons", "cupole manager"]
+  }
+]
