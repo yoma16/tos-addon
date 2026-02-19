@@ -1,4 +1,4 @@
--- v1.0.0 公開
+-- v1.0.0 first release
 local addonName = "cupole_manager"
 local version = "1.0.0"
 local author = "Yomae"
@@ -120,10 +120,10 @@ CM_create_folder("../addons/" .. addonNameLower)
 -- Init
 -- ============================================================
 function CUPOLE_MANAGER_ON_INIT(addon, frame)
+    frame:ShowWindow(1)
     g.addon = addon
     g.frame = frame
     g.lang = option.GetCurrentCountry()
-    acutil.slashCommand("/cupole", CM_CMD)
     addon:RegisterMsg("GAME_START_3SEC", "CM_GAME_START")
 end
 
@@ -138,18 +138,6 @@ function CM_GAME_START()
 end
 
 -- ============================================================
--- Slash Command
--- ============================================================
-function CM_CMD(command)
-    local cmd = table.remove(command, 1)
-    if cmd == "quick" or cmd == "q" then
-        CM_preset_quick_frame_open()
-    else
-        CM_preset_frame_open()
-    end
-end
-
--- ============================================================
 -- Settings Save/Load
 -- ============================================================
 function CM_save_settings()
@@ -161,8 +149,15 @@ function CM_load_settings()
     local changed = false
     local settings = CM_load_json(g.cupole_manager_path)
     if not settings then
-        settings = {}
-        changed = true
+        -- migrate from nexus_addons
+        local nexus_path = string.format("../addons/%s/%s/cupole_manager.json", "nexus_addons", g.active_id)
+        settings = CM_load_json(nexus_path)
+        if settings then
+            changed = true
+        else
+            settings = {}
+            changed = true
+        end
     end
     if not settings.default then
         settings.default = {}
@@ -299,7 +294,8 @@ function CM_set_cupole_slots()
         end
     end
     g.cupole_manager_num = 0
-    g.frame:RunUpdateScript("CM_summon_cupole", 1.0)
+    local cm_frame = ui.GetFrame("cupole_manager")
+    cm_frame:RunUpdateScript("CM_summon_cupole", 1.0)
 end
 
 function CM_summon_cupole(frame)
@@ -322,6 +318,7 @@ function CM_make_menu()
         name = "Cupole Preset",
         icon = "sysmenu_cupole_info",
         func = "CM_preset_frame_open",
+        rfunc = "CM_preset_quick_frame_open",
         image = ""
     }
     local frame_name = _G["norisan"]["MENU"].frame_name
@@ -330,13 +327,8 @@ function CM_make_menu()
         ui.DestroyFrame(frame_name)
     end
     frame_name = "norisan_menu_frame"
-    menu_frame = ui.GetFrame(frame_name)
-    if not menu_frame then
-        _G["norisan"]["MENU"].frame_name = frame_name
-        g.norisan_menu_create_frame()
-    elseif menu_frame:IsVisible() == 0 then
-        menu_frame:ShowWindow(1)
-    end
+    _G["norisan"]["MENU"].frame_name = frame_name
+    g.norisan_menu_create_frame()
 end
 
 -- ============================================================
@@ -929,7 +921,8 @@ function CM_preset_apply_by_index(tab_index)
     overlay:RunUpdateScript("CM_preset_overlay_check", 0.5)
     overlay:ShowWindow(1)
 
-    g.frame:RunUpdateScript("CM_preset_summon", 1.0)
+    local cm_frame = ui.GetFrame("cupole_manager")
+    cm_frame:RunUpdateScript("CM_preset_summon", 1.0)
     ui.SysMsg("[Cupole Preset] Applying preset...")
 end
 
@@ -1410,6 +1403,9 @@ function _G.norisan_menu_toggle_items_display(frame, ctrl, open_dir)
         if item_elem then
             item_elem:SetTextTooltip("{ol}" .. data.name)
             item_elem:SetEventScript(ui.LBUTTONUP, data.func)
+            if data.rfunc then
+                item_elem:SetEventScript(ui.RBUTTONUP, data.rfunc)
+            end
             item_elem:ShowWindow(1)
         end
     end
