@@ -3,3 +3,4 @@ AGENTS.md
 .codex/
 .codex-cache/
 codex*.log
+.claude/
