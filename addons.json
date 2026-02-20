@@ -5,9 +5,20 @@
     "file": "cupole_manager",
     "extension": "ipf",
     "fileVersion": "v1.0.1",
-    "releaseTag": "cupole_manager",
+    "releaseTag": "v1.0.1: fix slot remap and speed up summon interval",
     "unicode": "⛄",
     "description": "큐폴 관리 애드온. 프리셋을 관리하고 쉽게 적용할 수 있습니다.<br> 변경이 완료되면 슬롯에 있는 큐폴 스킬도 맞춰서 변경해줍니다. <br> Cupole manager. You can manage cupole preset and apply them easy <br>the Cupole skill in your slot will automatically change to the Cupole skill in the center as well!!! ",
+    "tags": ["yomae", "cupole", "addons", "cupole manager"]
+  },
+  {
+    "tosversion" : "20260221",
+    "name": "Toggle Cupole Potion",
+    "file": "toggle_cupole_potion",
+    "extension": "ipf",
+    "fileVersion": "v1.0.0",
+    "releaseTag": "v1.0.0: initial release",
+    "unicode": "⛄",
+    "description": "큐폴 물약 사용 토글을 키보드의 '\\' 버튼으로 할 수 있습니다. <BR> 단, 도시에서는 사용할 수 없습니다. <BR> You can toggle cupole potion with '\\' key. <BR> However, you cannot toggle in city.",
     "tags": ["yomae", "cupole", "addons", "cupole manager"]
   }
 ]
