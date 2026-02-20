@@ -7,7 +7,7 @@
     "fileVersion": "v1.0.0",
     "releaseTag": "cupole_manager",
     "unicode": "⛄",
-    "description": "큐폴 관리 애드온. 프리셋을 관리하고 쉽게 적용할 수 있습니다. <br> Cupole manager. You can manage cupole preset and apply them easy",
+    "description": "큐폴 관리 애드온. 프리셋을 관리하고 쉽게 적용할 수 있습니다.<br> 변경이 완료되면 슬롯에 있는 큐폴 스킬도 맞춰서 변경해줍니다. <br> Cupole manager. You can manage cupole preset and apply them easy <br>the Cupole skill in your slot will automatically change to the Cupole skill in the center as well!!! ",
     "tags": ["yomae", "cupole", "addons", "cupole manager"]
   }
 ]
