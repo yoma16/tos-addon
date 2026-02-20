@@ -1,5 +1,6 @@
 [
   {
+    "tosversion" : "20260220",
     "name": "Cupole manager",
     "file": "cupole_manager",
     "extension": "ipf",
