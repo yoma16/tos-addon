@@ -16,7 +16,7 @@
     "file": "toggle_cupole_potion",
     "extension": "ipf",
     "fileVersion": "v1.0.0",
-    "releaseTag": "v1.0.0: initial release",
+    "releaseTag": " toggle_cupole_potion-v1.0.0",
     "unicode": "⛄",
     "description": "큐폴 물약 사용 토글을 키보드의 '\\' 버튼으로 할 수 있습니다. <BR> 단, 도시에서는 사용할 수 없습니다. <BR> You can toggle cupole potion with '\\' key. <BR> However, you cannot toggle in city.",
     "tags": ["yomae", "cupole", "addons", "cupole manager"]
