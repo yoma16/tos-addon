@@ -1,6 +1,7 @@
 -- v1.0.0 first release
+-- v1.0.1 fix slot remap and speed up summon interval   
 local addonName = "cupole_manager"
-local version = "1.0.0"
+local version = "1.0.1"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -295,15 +296,18 @@ function CM_set_cupole_slots()
     end
     g.cupole_manager_num = 0
     local cm_frame = ui.GetFrame("cupole_manager")
-    cm_frame:RunUpdateScript("CM_summon_cupole", 1.0)
+    cm_frame:RunUpdateScript("CM_summon_cupole", 0.3)
 end
+
+-- slot remap: UI key 1=Center(slot1), 2=Left(slot2→game0), 3=Right(slot0→game2)
+local CM_SLOT_REMAP = {[0] = 0, [1] = 2, [2] = 1}
 
 function CM_summon_cupole(frame)
     if g.cupole_manager_num == 3 then
         frame:StopUpdateScript("CM_summon_cupole")
         return 0
     end
-    SummonCupole(tonumber(g.cupole_manager_tbl[tostring(g.cupole_manager_num + 1)].id), g.cupole_manager_num)
+    SummonCupole(tonumber(g.cupole_manager_tbl[tostring(g.cupole_manager_num + 1)].id), CM_SLOT_REMAP[g.cupole_manager_num])
     g.cupole_manager_num = g.cupole_manager_num + 1
     return 1
 end
@@ -922,7 +926,7 @@ function CM_preset_apply_by_index(tab_index)
     overlay:ShowWindow(1)
 
     local cm_frame = ui.GetFrame("cupole_manager")
-    cm_frame:RunUpdateScript("CM_preset_summon", 1.0)
+    cm_frame:RunUpdateScript("CM_preset_summon", 0.3)
     ui.SysMsg("[Cupole Preset] Applying preset...")
 end
 
@@ -1081,7 +1085,7 @@ function CM_preset_summon(frame)
     end
     if g.cupole_preset_apply_num < 3 then
         local slot_data = g.cupole_preset_apply_tbl[tostring(g.cupole_preset_apply_num + 1)]
-        SummonCupole(tonumber(slot_data.id), g.cupole_preset_apply_num)
+        SummonCupole(tonumber(slot_data.id), CM_SLOT_REMAP[g.cupole_preset_apply_num])
     end
     g.cupole_preset_apply_num = g.cupole_preset_apply_num + 1
     return 1
