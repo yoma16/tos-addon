@@ -44,3 +44,19 @@ tos-addon/
 
 ## Screenshot
 ![alt text](image.png)
+
+---
+
+# Toggle Cupole Potion     
+
+쿠폴 자동 물약 사용을 키보드 \ 키 한 번으로 토글하는 애드온입니다.
+
+## Features
+ - \ 키로 쿠폴 자동 물약 ON/OFF 토글(Toggle Cupole auto-potion ON/OFF with \ key)
+ - /tcp 슬래시 커맨드로도 토글 가능(Also available via /tcp slash command)
+ - 토글 시 채팅 로그에 현재 상태 (ON/OFF) 표시(Current state (ON/OFF) displayed in chat log on toggle)
+ - 마을에서는 토글 불가 (게임 제한사항) (Cannot toggle in city (game restriction))
+
+## Notes
+- 쿠폴 물약이 장착되어 있어야 동작합니다. (Cupole potion must be equipped for this to work)
+- 채팅 입력 중에는 \ 키가 동작하지 않을 수 있습니다. (\ key may not respond while typing in chat)
