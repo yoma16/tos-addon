@@ -38,10 +38,10 @@
 -- 1.0.0 "new nexus addon + added Zmei hard"
 
 
-local addon_name = "_NEXUS_ADDONS"
+local addon_name = "_NEW_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
-local author = "norisan"
-local ver = "1.1.10"
+local author = "yomae"
+local ver = "1.0.0"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -1224,7 +1224,7 @@ function _nexus_addons_frame_init()
     list_frame:SetLayerLevel(92)
     local title = list_frame:CreateOrGetControl('richtext', 'title', 20, 10, 10, 30)
     AUTO_CAST(title)
-    title:SetText("{#000000}{s25}Nexus Addons" .. " {s15}ver " .. ver)
+    title:SetText("{#000000}{s25}New Nexus Addons" .. " {s15}ver " .. ver)
     local close_button = list_frame:CreateOrGetControl('button', 'close_button', 0, 0, 20, 20)
     AUTO_CAST(close_button)
     close_button:SetImage("testclose_button")
