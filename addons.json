@@ -23,8 +23,8 @@
   },
   {
     "tosversion" : "20260301",
-    "name": "New Nexus Addon",
-    "file": "new_nexus_addon",
+    "name": "New Nexus Addons",
+    "file": "new_nexus_addons",
     "extension": "ipf",
     "fileVersion": "v1.0.0",
     "releaseTag": "new_nexus_addon_1.0.0",
