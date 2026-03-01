@@ -29,7 +29,7 @@
     "fileVersion": "v1.0.0",
     "releaseTag": "new_nexus_addon_1.0.0",
     "unicode": "⛄",
-    "description": "new 넥서스 애드온. 기존 애드온 파일(nexus ipf파일)만 삭제하세요. <br> new nexus addon. please remove just old addon file(nexus_addon ipf file)",
+    "description": "new 넥서스 애드온. <br>Zmei 하드레이드 추가<br>기존 애드온 파일(nexus ipf파일)만 삭제하세요. <br>new nexus addon. <br>Added Zmei hard <br>please remove just old addon file(nexus_addon ipf file)",
     "tags": ["yomae", "nexus", "ajinori", "new nexus"]
   }
 ]
