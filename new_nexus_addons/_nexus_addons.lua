@@ -38,7 +38,7 @@
 -- 1.0.0 "new nexus addon + added Zmei hard"
 
 
-local addon_name = "_NEW_NEXUS_ADDONS"
+local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
 local ver = "1.0.0"
