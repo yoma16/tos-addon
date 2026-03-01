@@ -33,7 +33,10 @@
 -- 1.1.8 “ILV convenience improvements”
 -- 1.1.9 "Automatically replace the slotted potion with a Wild Potion when matching in Zmei Dungeon"
 -- 1.1.10 "short cut"
--- 1.2.0 "added Zmei hard"
+------------------------------------------
+----- new nexus addons -----
+-- 1.0.0 "new nexus addon + added Zmei hard"
+
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
