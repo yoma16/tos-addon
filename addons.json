@@ -20,5 +20,16 @@
     "unicode": "⛄",
     "description": "큐폴 물약 사용 토글을 키보드의 '\\(BackSlash)' 버튼으로 할 수 있습니다. <br> 단, 도시에서는 사용할 수 없습니다. <br> You can toggle cupole potion with '\\' key. <br> However, you cannot toggle in city.",
     "tags": ["yomae", "cupole", "addons", "toggle cupole potion", "toggle", "potion"]
+  },
+  {
+    "tosversion" : "20260301",
+    "name": "New Nexus Addon",
+    "file": "new_nexus_addon",
+    "extension": "ipf",
+    "fileVersion": "v1.0.0",
+    "releaseTag": "new_nexus_addon",
+    "unicode": "⛄",
+    "description": "new 넥서스 애드온. 기존 애드온 파일(nexus ipf파일)만 삭제하세요. <br> new nexus addon. please remove just old addon file(nexus_addon ipf file)",
+    "tags": ["yomae", "nexus", "ajinori", "new nexus"]
   }
 ]
