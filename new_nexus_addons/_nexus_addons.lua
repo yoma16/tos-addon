@@ -36,6 +36,7 @@
 ------------------------------------------
 ----- new nexus addons -----
 -- 1.0.0 "new nexus addon + added Zmei hard"
+-- 1.0.1 "Added Zmei convenience functions, fixed some bugs"
 
 
 local addon_name = "_NEXUS_ADDONS"
@@ -22137,7 +22138,7 @@ g.quickslot_operate_raid_list = {
     Klaida = {686, 685, 687, 716, 717, 718},
     Velnias = {689, 688, 690, 669, 635, 628, 696, 695, 697},
     Forester = {672, 671, 670},
-    Widling = {677, 676, 678, 729, 730}
+    Widling = {677, 676, 678, 729, 730, 731}
 }
 g.quickslot_operate_zone_list = {11208, 11230, 11250, 11252, 11256, 11257, 11261, 11263, 11266, 11267, 11270, 11276,
                                  11277, 11278, 11285, 11286}
