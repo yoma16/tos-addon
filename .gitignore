@@ -5,3 +5,5 @@ AGENTS.md
 codex*.log
 .claude/
 .gitignore
+ipf_unpack.exe
+client
