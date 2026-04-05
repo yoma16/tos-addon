@@ -60,3 +60,39 @@ tos-addon/
 ## Notes
 - 쿠폴 물약이 장착되어 있어야 동작합니다. (Cupole potion must be equipped for this to work)
 - 채팅 입력 중에는 \ 키가 동작하지 않을 수 있습니다. (\ key may not respond while typing in chat)
+
+---
+
+# Auto Ads
+
+지정한 메시지를 일정 주기로 자동 전송하는 애드온입니다.
+An addon that automatically sends a specified message at regular intervals.
+
+## 주요 기능 / Features
+
+- **4가지 채널 지원 / 4 Channel Types**: 일반(`/s`), 외침(`/y`), 길드(`/g`), 길드강조(`/gn`)
+  Normal, Shout, Guild, Guild Notice
+- **주기 설정 / Interval Setting**: 초 단위로 전송 주기 설정 (외침: 최소 60초, 그 외: 최소 10초)
+  Set interval in seconds (Shout: min 60s, others: min 10s)
+- **한/영 전환 / KOR/ENG Toggle**: UI 우측 상단 KOR/ENG 버튼으로 언어 전환
+  Switch language via KOR/ENG button on the top right
+- **확성기 자동 감지 / Megaphone Detection**: 외침 채널 사용 시 확성기 소진 시 자동 정지
+  Auto-stops when megaphones run out (Shout channel)
+- **실시간 상태 표시 / Live Status**: 경과 시간, 전송 횟수, 확성기 잔량 표시
+  Shows elapsed time, send count, and remaining megaphones
+
+## 사용법 / Usage
+
+1. `/ads` — UI 열기 (Open UI)
+2. 메시지 종류 선택 (Select message type)
+3. 전송 주기(초)와 메시지 입력 (Enter interval and message)
+4. `시작/Start` 클릭 (Click Start)
+5. `/ads start` / `/ads stop` — 슬래시 커맨드로도 제어 가능 (Also controllable via slash commands)
+
+## 저장 경로 / Save Path
+
+- `../addons/auto_ads/<AID>/auto_ads.json`
+
+## Notes
+- 외침(`/y`) 사용 시 확성기 아이템이 필요합니다. (Megaphone item required for Shout channel)
+- 실행 중 UI를 닫으면 자동으로 정지됩니다. (Closing the UI while running will auto-stop)
