@@ -89,6 +89,8 @@ An addon that automatically sends a specified message at regular intervals.
 4. `시작/Start` 클릭 (Click Start)
 5. `/ads start` / `/ads stop` — 슬래시 커맨드로도 제어 가능 (Also controllable via slash commands)
 
+![alt text](image-1.png)
+
 ## 저장 경로 / Save Path
 
 - `../addons/auto_ads/<AID>/auto_ads.json`
