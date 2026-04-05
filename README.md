@@ -83,11 +83,10 @@ An addon that automatically sends a specified message at regular intervals.
 
 ## 사용법 / Usage
 
-1. `/ads` — UI 열기 (Open UI)
+1. UI 열기 (Open UI)
 2. 메시지 종류 선택 (Select message type)
 3. 전송 주기(초)와 메시지 입력 (Enter interval and message)
 4. `시작/Start` 클릭 (Click Start)
-5. `/ads start` / `/ads stop` — 슬래시 커맨드로도 제어 가능 (Also controllable via slash commands)
 
 ![alt text](image-1.png)
 
