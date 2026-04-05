@@ -8,7 +8,7 @@
     "releaseTag": "v1.0.1",
     "unicode": "⛄",
     "description": "큐폴 관리 애드온. 프리셋을 관리하고 쉽게 적용할 수 있습니다.<br> 변경이 완료되면 슬롯에 있는 큐폴 스킬도 맞춰서 변경해줍니다. <br> Cupole manager. You can manage cupole preset and apply them easy <br>the Cupole skill in your slot will automatically change to the Cupole skill in the center as well!!! ",
-    "tags": ["yomae", "cupole", "addons", "cupole manager"]
+    "tags": ["yomae", "cupole", "addons", "cupole manager", "cupole preset", "preset", "요매", "yoma16", "큐폴"]
   },
   {
     "tosversion" : "20260221",
@@ -19,7 +19,7 @@
     "releaseTag": "toggle_cupole_potion",
     "unicode": "⛄",
     "description": "큐폴 물약 사용 토글을 키보드의 '\\(BackSlash)' 버튼으로 할 수 있습니다. <br> 단, 도시에서는 사용할 수 없습니다. <br> You can toggle cupole potion with '\\' key. <br> However, you cannot toggle in city.",
-    "tags": ["yomae", "cupole", "addons", "toggle cupole potion", "toggle", "potion"]
+    "tags": ["yomae", "cupole", "addons", "toggle cupole potion", "toggle", "potion", "요매", "yoma16", "큐폴"]
   },
   {
     "tosversion" : "20260301",
@@ -30,6 +30,17 @@
     "releaseTag": "new_nexus_addons_v-1.0.1",
     "unicode": "⛄",
     "description": "new 넥서스 애드온. ctrl+` 버튼으로 토글창을 열 수 있습니다.<br>Zmei 하드레이드 클릭시 물약 자동교체<br>기존 애드온 파일(nexus ipf파일)만 삭제하세요. <br>new nexus addon. Press 'ctrl+`' to toggle window. <br>Auto change potions when click Zmei hard <br>please remove just old addon file(nexus_addon ipf file) <br>will be merged when Ajinori come back",
-    "tags": ["yomae", "nexus", "ajinori", "new nexus"]
+    "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
+  },
+  {
+    "tosversion" : "20260405",
+    "name": "Auto ads",
+    "file": "auto_ads",
+    "extension": "ipf",
+    "fileVersion": "v1.0.0",
+    "releaseTag": "auto_ads_v1.0.0",
+    "unicode": "⛄",
+    "description": "일반메시지, 외침, 길드메시지를 특정 주기에 맞춰 발송하게 하는 애드온. <br>메시지는 최소 10초마다, 외침은 10분마다, 길드메시지는 10분마다 발송됩니다. <br>Auto ads. It sends message, shout, guild message in specific period. <br>Message will be sent every 10 seconds at least, shout will be sent every 10 minutes.",
+    "tags": ["yomae", "auto_ads", "yoma16", "요매"]
   }
 ]
