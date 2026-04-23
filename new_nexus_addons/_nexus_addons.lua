@@ -37,12 +37,13 @@
 ----- new nexus addons -----
 -- 1.0.0 "new nexus addon + added Zmei hard"
 -- 1.0.1 "Added Zmei convenience functions, fixed some bugs"
+-- 1.0.2 "fix aethergem_manager bug"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.0.0"
+local ver = "1.0.2"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -27323,6 +27324,10 @@ function Aethergem_manager_load_settings()
             }
             changed = true
         end
+    end
+    if not settings.set then
+        settings.set = {}
+        changed = true
     end
     for i = 1, 6 do
         local i_str = tostring(i)
