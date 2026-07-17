@@ -29,7 +29,7 @@
     "fileVersion": "v1.0.4",
     "releaseTag": "new_nexus_addons_v-1.0.4",
     "unicode": "⛄",
-    "description": "new 넥서스 애드온. character change helper변경. ctrl+` 버튼으로 토글창을 열 수 있습니다.<br>Zmei 하드레이드 클릭시 물약 자동교체<br>기존 애드온 파일(nexus ipf파일)만 삭제하세요. <br>new nexus addon. Character change helper has changed. Press 'ctrl+`' to toggle window. <br>Auto change potions when click Zmei hard <br>please remove just old addon file(nexus_addon ipf file) <br>will be merged when Ajinori come back",
+    "description": "new nexus addons",
     "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
   },
   {
