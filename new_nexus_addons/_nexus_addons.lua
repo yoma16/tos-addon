@@ -38,12 +38,13 @@
 -- 1.0.0 "new nexus addon + added Zmei hard"
 -- 1.0.1 "Added Zmei convenience functions, fixed some bugs"
 -- 1.0.2 "fix aethergem_manager bug"
+-- 1.0.3 "CCH: 3 equipment sets - right-click take-out button to pick a set to equip, deposit uses current set"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.0.2"
+local ver = "1.0.3"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -4967,27 +4968,56 @@ function Cc_helper_save_settings()
     g.save_lua(g.cc_helper_path, g.cc_helper_settings)
 end
 
-function Cc_helper_missing_char_data(char_data)
-    if not char_data.items then
-        char_data.items = {}
+g.cc_helper_set_count = 3
+
+-- Ensure the multi-set structure exists and keep char_data.items as a live
+-- alias to the currently selected set's items (minimizes changes elsewhere).
+function Cc_helper_ensure_sets(char_data)
+    if not char_data.sets then
+        char_data.sets = {}
+        -- migrate legacy single-set data into set 1
+        if char_data.items and next(char_data.items) then
+            char_data.sets[1] = {
+                items = char_data.items
+            }
+        end
     end
+    for s = 1, g.cc_helper_set_count do
+        if not char_data.sets[s] then
+            char_data.sets[s] = {
+                items = {}
+            }
+        end
+        if not char_data.sets[s].items then
+            char_data.sets[s].items = {}
+        end
+        for _, key in ipairs(g.cc_helper_item_keys) do
+            if not char_data.sets[s].items[key] then
+                char_data.sets[s].items[key] = {
+                    iesid = "",
+                    clsid = 0,
+                    option = "",
+                    rank = "",
+                    image = ""
+                }
+            end
+        end
+    end
+    if not char_data.current or char_data.current < 1 or char_data.current > g.cc_helper_set_count then
+        char_data.current = 1
+    end
+    -- live alias so existing `[cid].items` reads/writes target the current set
+    char_data.items = char_data.sets[char_data.current].items
+end
+
+function Cc_helper_missing_char_data(char_data)
     char_data.agm = char_data.agm or 0
     char_data.agm_check = char_data.agm_check or 0
     char_data.mcc = char_data.mcc or 0
     if not char_data.name then
         char_data.name = "Unknown"
     end
-    for _, key in ipairs(g.cc_helper_item_keys) do
-        if not char_data.items[key] then
-            char_data.items[key] = {
-                iesid = "",
-                clsid = 0,
-                option = "",
-                rank = "",
-                image = ""
-            }
-        end
-    end
+    Cc_helper_ensure_sets(char_data)
 end
 
 function Cc_helper_load_settings()
@@ -4995,7 +5025,7 @@ function Cc_helper_load_settings()
     local json_path = string.format("../addons/%s/%s/cc_helper.json", addon_name_lower, g.active_id)
     local settings = g.load_lua(g.cc_helper_path)
     local need_save = false
-    local ver = 1.2
+    local ver = 1.3
     if not settings then
         settings = g.load_json(json_path)
         if settings then
@@ -5116,6 +5146,82 @@ function Cc_helper_ensure_settings_loaded()
     end
 end
 
+-- Switch the active equipment set (re-points the items alias) and persist.
+function Cc_helper_switch_set(n)
+    local cd = g.cc_helper_settings and g.cc_helper_settings[g.cid]
+    if not cd then
+        return
+    end
+    if n < 1 or n > g.cc_helper_set_count then
+        n = 1
+    end
+    cd.current = n
+    cd.items = cd.sets[n].items
+    Cc_helper_save_settings()
+end
+
+-- Right-click on the "take out (equip)" button: choose which set to equip.
+function Cc_helper_take_item_context(frame, ctrl)
+    local title = g.lang == "Japanese" and "{ol}セット選択" or "{ol}Select Set"
+    local context = ui.CreateContextMenu("cc_helper_set_context", title, 0, 0, 0, 0)
+    local cur = g.cc_helper_settings[g.cid].current or 1
+    for n = 1, g.cc_helper_set_count do
+        local mark = (n == cur) and " {#00FF00}<<" or ""
+        local text = string.format("{ol}Set %d%s", n, mark)
+        ui.AddContextMenuItem(context, text, string.format("Cc_helper_take_item_set(%d)", n))
+    end
+    ui.OpenContextMenu(context)
+end
+
+-- Switch to set n, then run the normal equip (take from warehouse) flow.
+function Cc_helper_take_item_set(n)
+    Cc_helper_switch_set(n)
+    local cch_setting = ui.GetFrame(addon_name_lower .. "cch_setting")
+    if cch_setting and cch_setting:IsVisible() == 1 then
+        Cc_helper_setting_frame_init()
+    end
+    local out_btn = GET_CHILD(ui.GetFrame("accountwarehouse"), "cch_out_btn")
+    if not out_btn or out_btn:IsVisible() == 0 then
+        out_btn = GET_CHILD(ui.GetFrame("inventory"), "cch_out_btn")
+    end
+    if out_btn then
+        Cc_helper_take_item(nil, out_btn, nil, 0)
+    end
+end
+
+-- Set tab in the config frame: switch active set and refresh the slots.
+function Cc_helper_setting_switch_set(frame, ctrl, argstr, n)
+    Cc_helper_switch_set(n)
+    Cc_helper_setting_frame_init()
+end
+
+-- Config-frame "Store" button: unequip current set and deposit to warehouse.
+-- Reuses the warehouse in_btn control so the async operation survives.
+function Cc_helper_setting_deposit()
+    local accountwarehouse = ui.GetFrame("accountwarehouse")
+    if not accountwarehouse or accountwarehouse:IsVisible() == 0 then
+        ui.SysMsg(g.lang == "Japanese" and "倉庫を開いてください" or "Open the warehouse first")
+        return
+    end
+    local in_btn = GET_CHILD(accountwarehouse, "cch_in_btn")
+    if in_btn then
+        Cc_helper_putitem(nil, in_btn, nil, 0)
+    end
+end
+
+-- Config-frame "Equip" button: equip the currently shown set from the warehouse.
+function Cc_helper_setting_equip()
+    local accountwarehouse = ui.GetFrame("accountwarehouse")
+    if not accountwarehouse or accountwarehouse:IsVisible() == 0 then
+        ui.SysMsg(g.lang == "Japanese" and "倉庫を開いてください" or "Open the warehouse first")
+        return
+    end
+    local out_btn = GET_CHILD(accountwarehouse, "cch_out_btn")
+    if out_btn then
+        Cc_helper_take_item(nil, out_btn, nil, 0)
+    end
+end
+
 function cc_helper_on_init()
     Cc_helper_ensure_settings_loaded()
     g.setup_hook_and_event(g.addon, "INVENTORY_OPEN", "Cc_helper_INVENTORY_OPEN", true)
@@ -5201,9 +5307,11 @@ function Cc_helper_accountwarehouse_btn_init()
     AUTO_CAST(out_btn)
     out_btn:SetText("{@st66b}{img chul_arrow 20 20}")
     out_btn:SetEventScript(ui.LBUTTONUP, "Cc_helper_take_item")
+    out_btn:SetEventScript(ui.RBUTTONUP, "Cc_helper_take_item_context")
     out_btn:SetSkinName("test_pvp_btn")
-    out_btn:SetTextTooltip(g.lang == "Japanese" and "{ol}[CCH]{nl}倉庫から搬出して装備します" or
-                               "{ol}[CCH]{nl}It is carried out from the warehouse and equipped")
+    out_btn:SetTextTooltip(g.lang == "Japanese" and
+                               "{ol}[CCH]{nl}倉庫から搬出して装備します{nl}左クリック: 現在のセット / 右クリック: セット選択" or
+                               "{ol}[CCH]{nl}It is carried out from the warehouse and equipped{nl}Left: current set / Right: choose set")
     out_btn:ShowWindow(1)
     local auto_close = accountwarehouse:CreateOrGetControl("checkbox", "cch_auto_close", 540, 120, 30, 30)
     AUTO_CAST(auto_close)
@@ -5260,10 +5368,25 @@ function Cc_helper_inventory_btn_init()
         AUTO_CAST(out_btn)
         out_btn:SetText("{@st66b}{img chul_arrow 20 20}")
         out_btn:SetEventScript(ui.LBUTTONUP, "Cc_helper_take_item")
+        out_btn:SetEventScript(ui.RBUTTONUP, "Cc_helper_take_item_context")
         out_btn:SetSkinName("test_pvp_btn")
-        out_btn:SetTextTooltip(g.lang == "Japanese" and "{ol}[CCH]{nl}倉庫から搬出して装備します" or
-                                   "{ol}[CCH]{nl}It is carried out from the warehouse and equipped")
+        out_btn:SetTextTooltip(g.lang == "Japanese" and
+                                   "{ol}[CCH]{nl}倉庫から搬出して装備します{nl}左クリック: 現在のセット / 右クリック: セット選択" or
+                                   "{ol}[CCH]{nl}It is carried out from the warehouse and equipped{nl}Left: current set / Right: choose set")
         out_btn:ShowWindow(1)
+    end
+end
+
+function Cc_helper_setting_tab_create(cch_setting)
+    local cur = g.cc_helper_settings[g.cid].current or 1
+    for n = 1, g.cc_helper_set_count do
+        local tab = cch_setting:CreateOrGetControl("button", "cch_set_tab_" .. n, 110 + (n - 1) * 48, 13, 46, 26)
+        AUTO_CAST(tab)
+        tab:SetText(string.format("{ol}Set%d", n))
+        tab:SetSkinName(n == cur and "test_pvp_btn" or "test_gray_button")
+        tab:SetEventScript(ui.LBUTTONUP, "Cc_helper_setting_switch_set")
+        tab:SetEventScriptArgNumber(ui.LBUTTONUP, n)
+        tab:SetTextTooltip(g.lang == "Japanese" and "{ol}編集するセットを選択" or "{ol}Select set to edit")
     end
 end
 
@@ -5289,7 +5412,8 @@ function Cc_helper_setting_frame_init(frame)
     cch_setting:EnableHittestFrame(1)
     local title_text = cch_setting:CreateOrGetControl("richtext", "title_text", 20, 15, 50, 30)
     AUTO_CAST(title_text)
-    title_text:SetText("{ol}CC Helper Config")
+    title_text:SetText("{ol}CCH config")
+    Cc_helper_setting_tab_create(cch_setting)
     local close = cch_setting:CreateOrGetControl("button", "close", 0, 0, 30, 30)
     AUTO_CAST(close)
     close:SetImage("testclose_button")
@@ -5298,24 +5422,38 @@ function Cc_helper_setting_frame_init(frame)
     local gbox = cch_setting:CreateOrGetControl("groupbox", "gbox", 10, 40, 0, 0)
     AUTO_CAST(gbox)
     gbox:SetSkinName("test_frame_midle_light")
-    local copy = gbox:CreateOrGetControl("button", "copy", 200, 10, 70, 30)
-    AUTO_CAST(copy)
-    copy:SetText("{ol}copy")
-    copy:SetEventScript(ui.LBUTTONUP, "Cc_helper_setting_copy")
-    copy:SetTextTooltip(g.lang == "Japanese" and "{ol}コピー用の設定を適用します" or
-                            "{ol}Applies the settings for copying")
-    local save = gbox:CreateOrGetControl("button", "save", 130, 10, 70, 30)
-    AUTO_CAST(save)
-    save:SetText("{ol}save")
-    save:SetEventScript(ui.LBUTTONUP, "Cc_helper_setting_save")
-    save:SetTextTooltip(g.lang == "Japanese" and "{ol}このキャラの設定をコピー用に保存します" or
-                            "{ol}Save this character settings for copying")
-    local save_delete = gbox:CreateOrGetControl("button", "save_delete", 60, 10, 70, 30)
+    local deposit = gbox:CreateOrGetControl("button", "cch_set_deposit", 4, 10, 54, 30)
+    AUTO_CAST(deposit)
+    deposit:SetText(g.lang == "Japanese" and "{ol}収納" or "{ol}Store")
+    deposit:SetSkinName("test_pvp_btn")
+    deposit:SetEventScript(ui.LBUTTONUP, "Cc_helper_setting_deposit")
+    deposit:SetTextTooltip(g.lang == "Japanese" and "{ol}装備を外して倉庫へ搬入します" or
+                               "{ol}Unequip and store into the warehouse")
+    local save_delete = gbox:CreateOrGetControl("button", "save_delete", 61, 10, 54, 30)
     AUTO_CAST(save_delete)
     save_delete:SetText("{ol}delete")
     save_delete:SetEventScript(ui.LBUTTONUP, "Cc_helper_setting_delete")
     save_delete:SetTextTooltip(g.lang == "Japanese" and "{ol}コピー用の設定を削除します" or
                                    "{ol}Delete settings for copying")
+    local save = gbox:CreateOrGetControl("button", "save", 118, 10, 54, 30)
+    AUTO_CAST(save)
+    save:SetText("{ol}save")
+    save:SetEventScript(ui.LBUTTONUP, "Cc_helper_setting_save")
+    save:SetTextTooltip(g.lang == "Japanese" and "{ol}このキャラの設定をコピー用に保存します" or
+                            "{ol}Save this character settings for copying")
+    local copy = gbox:CreateOrGetControl("button", "copy", 175, 10, 54, 30)
+    AUTO_CAST(copy)
+    copy:SetText("{ol}copy")
+    copy:SetEventScript(ui.LBUTTONUP, "Cc_helper_setting_copy")
+    copy:SetTextTooltip(g.lang == "Japanese" and "{ol}コピー用の設定を適用します" or
+                            "{ol}Applies the settings for copying")
+    local equip = gbox:CreateOrGetControl("button", "cch_set_equip", 232, 10, 54, 30)
+    AUTO_CAST(equip)
+    equip:SetText(g.lang == "Japanese" and "{ol}装着" or "{ol}Equip")
+    equip:SetSkinName("test_pvp_btn")
+    equip:SetEventScript(ui.LBUTTONUP, "Cc_helper_setting_equip")
+    equip:SetTextTooltip(g.lang == "Japanese" and "{ol}表示中のセットを装着します" or
+                             "{ol}Equip the currently shown set")
     if g.settings.monster_card_changer.use == 1 then
         local mccuse = gbox:CreateOrGetControl("checkbox", "mccuse", 10, 375, 25, 25)
         AUTO_CAST(mccuse)
@@ -5533,32 +5671,31 @@ function Cc_helper_slot_create(gbox, name, x, y, width, height, skin, text, clsi
         end
     end
     if string.find(name, "gem") then
-        if g.cc_helper_settings[g.cid].agm == 0 then
-            slot:ShowWindow(0)
-        elseif g.cc_helper_settings[g.cid].agm == 1 then
-            local gem_name = item_cls.ClassName
-            local icon = slot:GetIcon()
-            if not icon then
-                icon = CreateIcon(slot)
-            end
-            SET_SLOT_ITEM_CLS(slot, item_cls)
-            local lv_text = slot:CreateOrGetControl("richtext", "lv_text", 0, 30, 25, 25)
-            AUTO_CAST(lv_text)
-            if string.find(gem_name, "480") then
-                lv_text:SetText("{ol}{s14}LV480")
-                slot:SetSkinName("invenslot_rare")
-            elseif string.find(gem_name, "500") then
-                lv_text:SetText("{ol}{s14}LV500")
-                slot:SetSkinName("invenslot_unique")
-            elseif string.find(gem_name, "520") then
-                lv_text:SetText("{ol}{s14}LV520")
-                slot:SetSkinName("invenslot_legend")
-            elseif string.find(gem_name, "540") then
-                lv_text:SetText("{ol}{s14}LV540")
-                slot:SetSkinName("invenslot_pic_goddess")
-            else
-                lv_text:SetText("{ol}{s14}LV460")
-            end
+        -- gem slots always show as placeholders (equip/unequip behavior is still
+        -- gated by the Aether Gem checkbox in putitem/take_item, not visibility)
+        slot:ShowWindow(1)
+        local gem_name = item_cls.ClassName
+        local icon = slot:GetIcon()
+        if not icon then
+            icon = CreateIcon(slot)
+        end
+        SET_SLOT_ITEM_CLS(slot, item_cls)
+        local lv_text = slot:CreateOrGetControl("richtext", "lv_text", 0, 30, 25, 25)
+        AUTO_CAST(lv_text)
+        if string.find(gem_name, "480") then
+            lv_text:SetText("{ol}{s14}LV480")
+            slot:SetSkinName("invenslot_rare")
+        elseif string.find(gem_name, "500") then
+            lv_text:SetText("{ol}{s14}LV500")
+            slot:SetSkinName("invenslot_unique")
+        elseif string.find(gem_name, "520") then
+            lv_text:SetText("{ol}{s14}LV520")
+            slot:SetSkinName("invenslot_legend")
+        elseif string.find(gem_name, "540") then
+            lv_text:SetText("{ol}{s14}LV540")
+            slot:SetSkinName("invenslot_pic_goddess")
+        else
+            lv_text:SetText("{ol}{s14}LV460")
         end
     end
 end
@@ -5630,20 +5767,29 @@ function Cc_helper_setting_copy()
 end
 
 function Cc_helper_load_copy(cid)
-    for key, value in pairs(g.cc_helper_settings.etc.copys[cid]) do
-        if type(value) == "table" then
-            g.cc_helper_settings[g.cid].items = value
-        elseif key == "mcc" or key == "agm" or key == "agm_check" then
-            if key == "mcc" then
-                g.cc_helper_settings[g.cid].mcc = value
-            elseif key == "agm" then
-                g.cc_helper_settings[g.cid].agm = value
-            elseif key == "agm_check" then
-                g.cc_helper_settings[g.cid].agm_check = value
-            end
-        end
+    local src = g.cc_helper_settings.etc.copys[cid]
+    local cd = g.cc_helper_settings[g.cid]
+    if src.sets then
+        cd.sets = json.decode(json.encode(src.sets))
+    elseif src.items then
+        -- legacy copy without sets: load into set 1
+        cd.sets = {
+            [1] = {
+                items = json.decode(json.encode(src.items))
+            }
+        }
     end
-    g.cc_helper_settings[g.cid].name = g.login_name
+    if src.mcc ~= nil then
+        cd.mcc = src.mcc
+    end
+    if src.agm ~= nil then
+        cd.agm = src.agm
+    end
+    if src.agm_check ~= nil then
+        cd.agm_check = src.agm_check
+    end
+    Cc_helper_missing_char_data(cd) -- fills sets 1-3, clamps current, re-points items alias
+    cd.name = g.login_name
     Cc_helper_save_settings()
     ui.SysMsg(g.lang == "Japanese" and "設定をコピーしました" or "Settings copied")
     Cc_helper_setting_frame_init()
