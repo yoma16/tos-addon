@@ -97,3 +97,39 @@ An addon that automatically sends a specified message at regular intervals.
 ## Notes
 - 외침(`/y`) 사용 시 확성기 아이템이 필요합니다. (Megaphone item required for Shout channel)
 - 실행 중 UI를 닫으면 자동으로 정지됩니다. (Closing the UI while running will auto-stop)
+
+---
+
+# New Nexus Addons
+
+Ajinori의 Nexus Addons를 이어받은 통합 애드온 번들입니다. `Ctrl + ~`(백틱) 키로 토글 창을 열 수 있습니다.
+A merged bundle continuing Ajinori's Nexus Addons. Press `Ctrl + ~` (backtick) to open the toggle window.
+
+> 기존 nexus_addon `.ipf` 파일만 삭제한 뒤 설치하세요.
+> Remove only the old nexus_addon `.ipf` file before installing.
+
+## 주요 기능 / Features
+
+- **CCH 장비 세트 프리셋 / CCH Equipment Set Presets**: Character Change Helper에서 장비 세트를
+  **3개(Set1/2/3)**까지 등록하고 골라서 장착할 수 있습니다.
+  Register up to 3 equipment sets (Set1/2/3) in Character Change Helper and equip the one you pick.
+  - **빼기(창고→장착) / Take out (Warehouse → Equip)**: 빼기 버튼 **우클릭 → 세트 선택**으로 원하는 세트만 장착
+    Right-click the take-out button → pick a set to equip only that set
+  - **넣기(장착→창고) / Store (Equip → Warehouse)**: 현재 착용 중인(=현재 세트) 등록 아이템을 그대로 예치
+    Deposits the currently worn (current set) registered items as-is
+  - **설정창 탭 / Setting Tabs**: 설정창 상단 `[Set1][Set2][Set3]` 탭으로 세트별 아이템 등록/편집
+    Register/edit items per set via the `[Set1][Set2][Set3]` tabs at the top of the settings window
+  - **창고 없이 조작 / Store·Equip buttons**: 설정창의 `収納/Store`, `装着/Equip` 버튼으로 창고에서 바로 예치/장착
+    Deposit/equip directly from the settings window's `収納/Store` and `装着/Equip` buttons
+  - 기존 1세트 설정은 자동으로 **Set1으로 마이그레이션**됩니다. (Existing single-set config auto-migrates to Set1)
+- **Zmei 하드레이드 물약 자동 교체 / Zmei Hard Raid Auto-Potion**: Zmei 하드레이드 클릭 시 속성 물약을 자동 교체
+  Auto-swaps attribute potions when entering the Zmei hard raid
+
+## 저장 경로 / Save Path
+
+- `../addons/<nexus addons 설정 경로>` (애드온 내부 규칙에 따름 / per the addon's own convention)
+
+## Notes
+- 인게임 반영을 위해서는 `.ipf` 재패킹이 필요합니다. (Repacking the `.ipf` is required to apply changes in-game)
+- 소스 원본은 `new_nexus_addons/_nexus_addons.lua`이며, `ipf/`·`ipf_maker/`는 패킹용 복사본입니다.
+  The source of truth is `new_nexus_addons/_nexus_addons.lua`; `ipf/` and `ipf_maker/` are packing copies.
