@@ -39,12 +39,13 @@
 -- 1.0.1 "Added Zmei convenience functions, fixed some bugs"
 -- 1.0.2 "fix aethergem_manager bug"
 -- 1.0.3 "CCH: 3 equipment sets - right-click take-out button to pick a set to equip, deposit uses current set"
+-- 1.0.4 "CCH: per-set copy/save (save/copy one set at a time, copy sources shown by set number)"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.0.3"
+local ver = "1.0.4"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -5111,10 +5112,44 @@ function Cc_helper_load_settings()
             Cc_helper_missing_char_data(val)
         end
     end
-    for _, val in pairs(settings.etc.copys) do
+    -- normalize copy sources to single-set entries keyed as "<cid>_set<N>".
+    -- legacy entries (plain cid key, no setnum, possibly whole-char with .sets)
+    -- are collapsed to one item set and re-keyed under "<cid>_set1".
+    local copys = settings.etc.copys
+    local legacy_keys = {}
+    for k, val in pairs(copys) do
         if type(val) == "table" then
-            Cc_helper_missing_char_data(val)
+            if not val.setnum then
+                -- legacy: derive a single item set, drop multi-set structure
+                if not val.items or not next(val.items) then
+                    if val.sets then
+                        local sc = val.current or 1
+                        local sset = val.sets[sc] or val.sets[1]
+                        val.items = (sset and sset.items) or {}
+                    end
+                end
+                val.items = val.items or {}
+                val.sets = nil
+                val.current = nil
+                val.setnum = 1
+                if not string.find(tostring(k), "_set") then
+                    legacy_keys[#legacy_keys + 1] = k
+                end
+            else
+                -- new-format entry: keep it single-set (drop any stale .sets)
+                val.sets = nil
+                val.current = nil
+                val.items = val.items or {}
+            end
         end
+    end
+    for _, k in ipairs(legacy_keys) do
+        local newk = tostring(k) .. "_set1"
+        if not copys[newk] then
+            copys[newk] = copys[k]
+        end
+        copys[k] = nil
+        need_save = true
     end
     g.cc_helper_settings = settings
     if need_save then
@@ -5760,7 +5795,8 @@ function Cc_helper_setting_copy()
         local job_cls = GetClassByType("Job", char_data.jobid)
         local job_name = GET_JOB_NAME(job_cls, char_data.gender)
         local name = char_data.name
-        local text = name .. " (" .. job_name .. ")"
+        local setnum = char_data.setnum or 1 -- legacy entries without a set show as Set 1
+        local text = name .. " (" .. job_name .. ") Set " .. setnum
         local scp = ui.AddContextMenuItem(context, text, string.format("Cc_helper_load_copy('%s')", cid))
     end
     ui.OpenContextMenu(context)
@@ -5769,15 +5805,21 @@ end
 function Cc_helper_load_copy(cid)
     local src = g.cc_helper_settings.etc.copys[cid]
     local cd = g.cc_helper_settings[g.cid]
-    if src.sets then
-        cd.sets = json.decode(json.encode(src.sets))
-    elseif src.items then
-        -- legacy copy without sets: load into set 1
-        cd.sets = {
-            [1] = {
-                items = json.decode(json.encode(src.items))
-            }
-        }
+    Cc_helper_ensure_sets(cd) -- make sure sets/current/items alias are valid
+    -- source items: new per-set source has .items; legacy whole-char source
+    -- (has .sets) -> take its current set
+    local src_items
+    if src.items then
+        src_items = src.items
+    elseif src.sets then
+        local scur = src.current or 1
+        local sset = src.sets[scur] or src.sets[1]
+        src_items = sset and sset.items
+    end
+    if src_items then
+        -- copy into the currently shown set only; leave other sets intact
+        cd.sets[cd.current].items = json.decode(json.encode(src_items))
+        Cc_helper_ensure_sets(cd) -- fill any missing item keys, re-point items alias
     end
     if src.mcc ~= nil then
         cd.mcc = src.mcc
@@ -5788,7 +5830,6 @@ function Cc_helper_load_copy(cid)
     if src.agm_check ~= nil then
         cd.agm_check = src.agm_check
     end
-    Cc_helper_missing_char_data(cd) -- fills sets 1-3, clamps current, re-points items alias
     cd.name = g.login_name
     Cc_helper_save_settings()
     ui.SysMsg(g.lang == "Japanese" and "設定をコピーしました" or "Settings copied")
@@ -5803,7 +5844,8 @@ function Cc_helper_setting_delete(frame, ctrl)
         local job_cls = GetClassByType("Job", char_data.jobid)
         local job_name = GET_JOB_NAME(job_cls, char_data.gender)
         local name = char_data.name
-        local text = "{ol}{#FF0000}" .. name .. " (" .. job_name .. ")"
+        local setnum = char_data.setnum or 1 -- legacy entries without a set show as Set 1
+        local text = "{ol}{#FF0000}" .. name .. " (" .. job_name .. ") Set " .. setnum
         local scp = ui.AddContextMenuItem(context, text, string.format("Cc_helper_setting_delete_('%s')", cid))
     end
     ui.OpenContextMenu(context)
@@ -5816,15 +5858,26 @@ function Cc_helper_setting_delete_(cid)
 end
 
 function Cc_helper_setting_save(frame, ctrl)
-    local current_char_data_str = json.encode(g.cc_helper_settings[g.cid])
-    local new_copy_data = json.decode(current_char_data_str)
-    g.cc_helper_settings.etc.copys[g.cid] = new_copy_data
+    local cd = g.cc_helper_settings[g.cid]
+    Cc_helper_ensure_sets(cd)
+    -- save only the currently shown set as the copy source, keyed per (char, set)
+    -- so each set is a distinct entry (does not overwrite other sets)
+    local key = tostring(g.cid) .. "_set" .. cd.current
+    local new_copy_data = {
+        items = json.decode(json.encode(cd.sets[cd.current].items)),
+        setnum = cd.current,
+        agm = cd.agm,
+        agm_check = cd.agm_check,
+        mcc = cd.mcc,
+        name = cd.name or g.login_name
+    }
     local pc_info = session.barrack.GetMyAccount():GetByStrCID(g.cid)
     local pc_apc = pc_info:GetApc()
     local jobid = pc_info:GetRepID() or pc_apc:GetJob()
     local gender = pc_apc:GetGender()
-    g.cc_helper_settings.etc.copys[g.cid].jobid = jobid
-    g.cc_helper_settings.etc.copys[g.cid].gender = gender
+    new_copy_data.jobid = jobid
+    new_copy_data.gender = gender
+    g.cc_helper_settings.etc.copys[key] = new_copy_data
     ui.SysMsg(g.lang == "Japanese" and "設定を保存しました" or "Settings saved")
     Cc_helper_save_settings()
 end
