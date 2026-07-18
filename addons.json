@@ -26,10 +26,10 @@
     "name": "New Nexus Addons",
     "file": "new_nexus_addons",
     "extension": "ipf",
-    "fileVersion": "v1.0.5",
-    "releaseTag": "new_nexus_addons_v-1.0.5",
+    "fileVersion": "v1.0.6",
+    "releaseTag": "new_nexus_addons_v-1.0.6",
     "unicode": "⛄",
-    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.0.5: Other Character Skill List 설정 프레임이 안 열리던 버그 수정. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.0.5: fixed the Other Character Skill List settings frame not opening. <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.0.5: Other Character Skill Listの設定フレームが開かないバグを修正。",
+    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.0.6: Other Character Skill List에서 도시 진입마다 캐릭터가 사라지던 버그 수정(바락 목록 기준으로 정리). <br>yomae fork of norisan's Nexus Addons framework. <br>v1.0.6: fixed Other Character Skill List wiping stored characters on every city entry (now prunes by the barrack roster). <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.0.6: Other Character Skill Listで都市に入る度にキャラが消えるバグを修正(バラック一覧基準で整理)。",
     "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
   },
   {

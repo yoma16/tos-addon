@@ -41,12 +41,13 @@
 -- 1.0.3 "CCH: 3 equipment sets - right-click take-out button to pick a set to equip, deposit uses current set"
 -- 1.0.4 "CCH: per-set copy/save (save/copy one set at a time, copy sources shown by set number)"
 -- 1.0.5 "OCSL: fix settings frame not opening (lazy-load char data when opened outside a city)"
+-- 1.0.6 "OCSL: prune characters by the barrack roster instead of system_option pc_id (pc_id wiped valid chars on every city entry, leaving only the current char); auto-register current-layer chars"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.0.5"
+local ver = "1.0.6"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -13742,47 +13743,66 @@ function Other_character_skill_list_load_settings()
     end
 end
 
-local function GetValidCIDs()
-    local valid_cids = {}
-    local aid = session.loginInfo.GetAID()
-    local sys_opt_path = string.format("../release/addon_setting/system_option/%s/settings.json", aid)
-    local sys_opt_file = io.open(sys_opt_path, "r")
-    if sys_opt_file then
-        local content = sys_opt_file:read("*a")
-        sys_opt_file:close()
-        if content and content ~= "" then
-            local status, data = pcall(json.decode, content)
-            if status and data and data.pc_id then
-                for k, _ in pairs(data.pc_id) do
-                    valid_cids[tostring(k)] = true
+function Other_character_skill_list_char_load_settings()
+    local acc_info = session.barrack.GetMyAccount()
+    if acc_info then
+        -- Register/refresh the characters in the currently selected barrack
+        -- layer. Only the current layer is enumerable via GetPCByIndex, which is
+        -- why the help text asks you to log in once from each barrack (1/2/3) so
+        -- every character's layer gets recorded for correct ordering.
+        local layer_pc_count = acc_info:GetPCCount()
+        for order = 0, layer_pc_count - 1 do
+            local pc_info = acc_info:GetPCByIndex(order)
+            if pc_info then
+                local pc_apc = pc_info:GetApc()
+                if pc_apc then
+                    local pc_name = pc_apc:GetName()
+                    local char_data = g.ocsl_settings.chars[pc_name] or {}
+                    char_data.name = pc_name
+                    char_data.cid = char_data.cid or pc_info:GetCID()
+                    char_data.layer = g.ocsl_layer or char_data.layer or 9
+                    char_data.order = order
+                    char_data.hide = char_data.hide or 0
+                    char_data.equips = char_data.equips or {}
+                    char_data.gear_score = char_data.gear_score or 0
+                    g.ocsl_settings.chars[pc_name] = char_data
                 end
             end
         end
-    end
-    return valid_cids
-end
-
-function Other_character_skill_list_char_load_settings()
-    local valid_cids = GetValidCIDs()
-    if next(valid_cids) then
-        local chars_to_delete = {}
-        for char_name, char_data in pairs(g.ocsl_settings.chars) do
-            local cid_str = tostring(char_data.cid)
-            if not valid_cids[cid_str] then
-                table.insert(chars_to_delete, char_name)
+        -- Prune only characters that no longer exist on the account. The barrack
+        -- roster (GetBarrackPCByIndex) is the full, authoritative character list,
+        -- but it is empty right after game launch, so guard on count > 0 to avoid
+        -- wiping the list before the roster has loaded. This is the same safe
+        -- pattern InstantCC uses (Instant_cc_save_char_data).
+        local barrack_all = acc_info:GetBarrackPCCount()
+        if barrack_all > 0 then
+            local barrack_chars = {}
+            for i = 0, barrack_all - 1 do
+                local pc_info = acc_info:GetBarrackPCByIndex(i)
+                if pc_info then
+                    barrack_chars[pc_info:GetName()] = true
+                end
+            end
+            local chars_to_delete = {}
+            for char_name, _ in pairs(g.ocsl_settings.chars) do
+                if not barrack_chars[char_name] then
+                    table.insert(chars_to_delete, char_name)
+                end
+            end
+            for _, char_name in ipairs(chars_to_delete) do
+                g.ocsl_settings.chars[char_name] = nil
             end
         end
-        for _, char_name in ipairs(chars_to_delete) do
-            g.ocsl_settings.chars[char_name] = nil
-        end
     end
+    -- Always ensure the currently logged-in character is present, even when the
+    -- barrack account data is not available yet (added last so it survives the
+    -- prune above for a freshly created character not yet in the roster).
     local my_handle = session.GetMyHandle()
     if my_handle then
         local my_name = info.GetName(my_handle)
-        local my_cid = info.GetCID(my_handle)
         local char_data = g.ocsl_settings.chars[my_name] or {}
         char_data.name = my_name
-        char_data.cid = my_cid
+        char_data.cid = char_data.cid or info.GetCID(my_handle)
         char_data.layer = char_data.layer or g.ocsl_layer or 1
         char_data.order = char_data.order or 0
         char_data.hide = char_data.hide or 0
@@ -13792,51 +13812,6 @@ function Other_character_skill_list_char_load_settings()
     end
     Other_character_skill_list_save_settings()
 end
-
---[[function Other_character_skill_list_char_load_settings()
-    local acc_info = session.barrack.GetMyAccount()
-    local layer_pc_count = acc_info:GetPCCount()
-    for order = 0, layer_pc_count - 1 do
-        local pc_info = acc_info:GetPCByIndex(order)
-        if pc_info then
-            local pc_apc = pc_info:GetApc()
-            local pc_name = pc_apc:GetName()
-            local pc_cid = pc_info:GetCID()
-            local existing_data = g.ocsl_settings.chars[pc_name] or {}
-            g.ocsl_settings.chars[pc_name] = {
-                layer = g.ocsl_layer or existing_data.layer or 9,
-                order = order,
-                cid = existing_data.cid or pc_cid,
-                name = pc_name,
-                gear_score = existing_data.gear_score or 0,
-                hide = existing_data.hide or 0,
-                equips = existing_data.equips or {}
-            }
-        end
-    end
-    local barrack_all = acc_info:GetBarrackPCCount()
-    if barrack_all > 0 then
-        local barrack_chars = {}
-        for i = 0, barrack_all - 1 do
-            local pc_info = acc_info:GetBarrackPCByIndex(i)
-            if pc_info then
-                barrack_chars[pc_info:GetName()] = true
-            end
-        end
-        local chars_to_delete = {}
-        for char_name, _ in pairs(g.ocsl_settings.chars) do
-            if not barrack_chars[char_name] then
-                table.insert(chars_to_delete, char_name)
-            end
-        end
-        if #chars_to_delete > 0 then
-            for _, char_name in ipairs(chars_to_delete) do
-                g.ocsl_settings.chars[char_name] = nil
-            end
-        end
-    end
-    Other_character_skill_list_save_settings()
-end]]
 
 function other_character_skill_list_on_init()
     local old_func = g.settings.other_character_skill_list.old_init_func
