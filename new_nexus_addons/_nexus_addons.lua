@@ -40,12 +40,13 @@
 -- 1.0.2 "fix aethergem_manager bug"
 -- 1.0.3 "CCH: 3 equipment sets - right-click take-out button to pick a set to equip, deposit uses current set"
 -- 1.0.4 "CCH: per-set copy/save (save/copy one set at a time, copy sources shown by set number)"
+-- 1.0.5 "OCSL: fix settings frame not opening (lazy-load char data when opened outside a city)"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.0.4"
+local ver = "1.0.5"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -14040,10 +14041,39 @@ function Other_character_skill_list_split_earring_options(earring_data_string)
 end
 
 function Other_character_skill_list_frame_open()
-    Other_character_skill_list_save_enchant()
     if g.settings.other_character_skill_list.use == 0 then
         return
     end
+    -- Lazy-load: the settings frame can be opened from anywhere (e.g. Nexus
+    -- Addons management list), but char data is normally only loaded/sorted on
+    -- city entry. Ensure data exists before use so the frame does not silently
+    -- fail with a nil error.
+    if not g.ocsl_settings then
+        Other_character_skill_list_load_settings()
+    end
+    if not g.ocsl_sorted_chars or #g.ocsl_sorted_chars == 0 then
+        Other_character_skill_list_char_load_settings()
+        Other_character_skill_list_sort()
+    end
+    -- save_enchant indexes inventory equip slots and can raise if the inventory
+    -- UI is not built yet; it is only a refresh, so never let it block the frame.
+    pcall(Other_character_skill_list_save_enchant)
+    if not g.ocsl_sorted_chars or #g.ocsl_sorted_chars == 0 then
+        local msg = g.lang == "Japanese" and
+            "[Nexus Addons] 表示できるキャラクター情報がありません。都市でキャラクターを切り替えると記録されます" or
+            "[Nexus Addons] No character data to display. Info is recorded when you switch characters in a city."
+        imcAddOn.BroadMsg("NOTICE_Dm_!", msg, 5.0)
+        return
+    end
+    local ok, err = pcall(Other_character_skill_list_render_frame)
+    if not ok then
+        local m = "[Nexus Addons] OCSL open error: " .. tostring(err)
+        imcAddOn.BroadMsg("NOTICE_Dm_!", m, 10.0)
+        pcall(g.log_to_file, m)
+    end
+end
+
+function Other_character_skill_list_render_frame()
     local ocsl = ui.CreateNewFrame("notice_on_pc", addon_name_lower .. "ocsl", 0, 0, 70, 30)
     AUTO_CAST(ocsl)
     ocsl:SetSkinName("test_frame_midle_light")
@@ -14063,15 +14093,16 @@ function Other_character_skill_list_frame_open()
         if char_settings.hide ~= 1 or g.ocsl_settings.hide == 0 then
             local job_list, level, last_job_id = GetJobListFromAdventureBookCharData(char_info.name)
             if type(_G["INDUN_LIST_VIEWER_ON_INIT"]) == "function" then
-                local ilv_settings = _G["ADDONS"]["norisan"]["indun_list_viewer"].settings
-                if ilv_settings[char_info.name] then
+                local ilv = _G["ADDONS"]["norisan"]["indun_list_viewer"]
+                local ilv_settings = ilv and ilv.settings
+                if ilv_settings and ilv_settings[char_info.name] then
                     if ilv_settings[char_info.name].president_jobid ~= "" then
                         last_job_id = ilv_settings[char_info.name].president_jobid
                     end
                 end
             elseif type(_G["indun_list_viewer_on_init"]) == "function" then
                 local ilv_settings = _G["ADDONS"]["norisan"]["_NEXUS_ADDONS"].ilv_settings
-                if ilv_settings.chars[char_info.name] then
+                if ilv_settings and ilv_settings.chars and ilv_settings.chars[char_info.name] then
                     if ilv_settings.chars[char_info.name].president_jobid ~= "" then
                         last_job_id = ilv_settings.chars[char_info.name].president_jobid
                     end
