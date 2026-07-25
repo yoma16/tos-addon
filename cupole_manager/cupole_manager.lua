@@ -1,7 +1,8 @@
 -- v1.0.0 first release
--- v1.0.1 fix slot remap and speed up summon interval   
+-- v1.0.1 fix slot remap and speed up summon interval
+-- v1.0.2 add always-on-screen preset HUD (labeled toggle button + separate compact preset panel)
 local addonName = "cupole_manager"
-local version = "1.0.1"
+local version = "1.0.2"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -136,6 +137,12 @@ function CM_GAME_START()
     CM_auto_summon()
     CM_register_hooks()
     CM_make_menu()
+    -- HUD only appears in town (fires on every map load via GAME_START_3SEC)
+    if CM_get_map_type() == "City" then
+        CM_hud_create()
+    else
+        CM_hud_destroy()
+    end
 end
 
 -- ============================================================
@@ -166,6 +173,11 @@ function CM_load_settings()
     end
     if not settings.presets then
         settings.presets = {}
+        changed = true
+    end
+    if not settings.hud then
+        -- position (x/y) is initialised by CM_hud_create (left-middle default)
+        settings.hud = { open = 0 }
         changed = true
     end
     g.cupole_manager_settings = settings
@@ -322,7 +334,7 @@ function CM_make_menu()
         name = "Cupole Preset",
         icon = "sysmenu_cupole_info",
         func = "CM_preset_frame_open",
-        rfunc = "CM_preset_quick_frame_open",
+        rfunc = "CM_hud_toggle",
         image = ""
     }
     local frame_name = _G["norisan"]["MENU"].frame_name
@@ -393,7 +405,7 @@ function CM_preset_frame_open()
     frame = ui.CreateNewFrame("notice_on_pc", frame_name, 0, 0, 0, 0)
     AUTO_CAST(frame)
     frame:RemoveAllChild()
-    frame:Resize(560, 500)
+    frame:Resize(560, 520)
     frame:SetSkinName("None")
     frame:SetTitleBarSkin("None")
     frame:SetLayerLevel(92)
@@ -402,9 +414,9 @@ function CM_preset_frame_open()
 
     local sw = ui.GetClientInitialWidth()
     local sh = ui.GetClientInitialHeight()
-    frame:SetPos((sw - 560) / 2, (sh - 500) / 2)
+    frame:SetPos((sw - 560) / 2, (sh - 520) / 2)
 
-    local bg = frame:CreateOrGetControl("groupbox", "bg", 560, 460, ui.LEFT, ui.TOP, 0, 40, 0, 0)
+    local bg = frame:CreateOrGetControl("groupbox", "bg", 560, 480, ui.LEFT, ui.TOP, 0, 40, 0, 0)
     AUTO_CAST(bg)
     bg:SetSkinName("test_frame_low")
     bg:EnableHittestGroupBox(false)
@@ -493,12 +505,12 @@ function CM_preset_frame_open()
     save_btn:SetClickSound("button_click_stats")
     save_btn:SetEventScript(ui.LBUTTONUP, "CM_preset_save")
 
-    local clear_btn = frame:CreateOrGetControl("button", "clear_btn", 290, 275, 65, 35)
-    AUTO_CAST(clear_btn)
-    clear_btn:SetText("{ol}{s14}Clear")
-    clear_btn:SetOverSound("button_over")
-    clear_btn:SetClickSound("button_click_stats")
-    clear_btn:SetEventScript(ui.LBUTTONUP, "CM_preset_clear")
+    local delete_btn = frame:CreateOrGetControl("button", "delete_btn", 290, 275, 65, 35)
+    AUTO_CAST(delete_btn)
+    delete_btn:SetText("{ol}{s14}{#ff6666}Delete")
+    delete_btn:SetOverSound("button_over")
+    delete_btn:SetClickSound("button_click_stats")
+    delete_btn:SetEventScript(ui.LBUTTONUP, "CM_preset_delete")
 
     local grid_label = frame:CreateOrGetControl("richtext", "grid_label", 20, 318, 200, 20)
     grid_label:SetText("{ol}{s14}Owned Cupoles:")
@@ -800,6 +812,44 @@ function CM_preset_load_current(frame, ctrl)
     ui.SysMsg("[Cupole Preset] Current Cupoles loaded to slots (press Save to keep)")
 end
 
+-- Rebuild the editor so the top tab labels refresh (the tab control does not
+-- repaint in place after ClearItem/AddItem). DestroyFrame is DEFERRED, so we
+-- must close on one tick and reopen on the next -- recreating in the same event
+-- lets the pending destroy clobber the new frame (window just closes). Driven
+-- by the always-alive main "cupole_manager" frame.
+function CM_preset_reopen(frame, tab_index)
+    g.cupole_preset_reopen = { index = tab_index, x = frame:GetX(), y = frame:GetY(), phase = 0 }
+    local mf = ui.GetFrame("cupole_manager")
+    if mf then
+        mf:RunUpdateScript("CM_preset_reopen_step", 0.02)
+    end
+end
+
+function CM_preset_reopen_step(mf)
+    local st = g.cupole_preset_reopen
+    if not st then
+        mf:StopUpdateScript("CM_preset_reopen_step")
+        return 0
+    end
+    if st.phase == 0 then
+        CM_preset_frame_close()   -- queue destroy of the old frame
+        st.phase = 1
+        return 1                  -- wait one tick for the destroy to flush
+    end
+    mf:StopUpdateScript("CM_preset_reopen_step")
+    g.cupole_preset_reopen = nil
+    CM_preset_frame_open()
+    local nf = ui.GetFrame(addonNameLower .. "_preset")
+    if nf then
+        nf:SetPos(st.x, st.y)
+        local ntab = GET_CHILD(nf, "tab")
+        AUTO_CAST(ntab)
+        ntab:SelectTab(st.index)
+        CM_preset_tab_change(nf)
+    end
+    return 0
+end
+
 function CM_preset_save(frame, ctrl)
     local tab = GET_CHILD(frame, "tab")
     AUTO_CAST(tab)
@@ -817,39 +867,21 @@ function CM_preset_save(frame, ctrl)
     end
     preset.name = set_name
     CM_save_settings()
-    tab:ClearItem()
-    for i = 1, 10 do
-        local p = g.cupole_manager_settings.presets[tostring(i - 1)]
-        local tab_label = p and p.name and p.name ~= "" and p.name or ("Set " .. i)
-        tab:AddItem("{@st66b}{s14}" .. tab_label, true, "", "", "", "", "", false)
-    end
-    tab:SetItemsFixWidth(52)
-    tab:SetItemsAdjustFontSizeByWidth(52)
-    tab:SelectTab(tab_index)
-    local save_btn = GET_CHILD(frame, "save_btn")
-    AUTO_CAST(save_btn)
-    save_btn:SetText("{ol}{s14}Save")
+    CM_hud_refresh()
     ui.SysMsg("[Cupole Preset] Saved: " .. set_name)
+    CM_preset_reopen(frame, tab_index)
 end
 
-function CM_preset_clear(frame, ctrl)
+-- fully removes the preset (name + slots) from settings
+function CM_preset_delete(frame, ctrl)
     local tab = GET_CHILD(frame, "tab")
     AUTO_CAST(tab)
     local tab_index = tab:GetSelectItemIndex()
-    local preset = g.cupole_manager_settings.presets[tostring(tab_index)]
-    if preset then
-        preset["1"] = nil
-        preset["2"] = nil
-        preset["3"] = nil
-    end
-    CM_preset_render_slots(frame, tab_index)
-    local name_edit = GET_CHILD(frame, "name_edit")
-    AUTO_CAST(name_edit)
-    name_edit:SetText("")
-    local save_btn = GET_CHILD(frame, "save_btn")
-    AUTO_CAST(save_btn)
-    save_btn:SetText("{ol}{s14}{#ff3333}Save")
-    ui.SysMsg("[Cupole Preset] Set " .. (tab_index + 1) .. " cleared (press Save to keep)")
+    g.cupole_manager_settings.presets[tostring(tab_index)] = nil
+    CM_save_settings()
+    CM_hud_refresh()
+    ui.SysMsg("[Cupole Preset] Deleted Set " .. (tab_index + 1))
+    CM_preset_reopen(frame, tab_index)
 end
 
 function CM_preset_apply(frame, ctrl)
@@ -931,125 +963,249 @@ function CM_preset_apply_by_index(tab_index)
 end
 
 -- ============================================================
--- Quick Apply Frame
+-- Preset HUD (toggle button + separate compact preset panel)
+--   Two frames: the toggle button frame is created once and never
+--   destroyed (so clicking it can't make it vanish); the panel frame
+--   is (re)built / destroyed on toggle. Position + open state persist.
 -- ============================================================
-function CM_preset_quick_frame_open()
-    if not g.cupole_manager_settings then
-        CM_load_settings()
-    end
-    local frame_name = addonNameLower .. "_quick"
-    local frame = ui.GetFrame(frame_name)
-    if frame and frame:IsVisible() == 1 then
-        frame:ShowWindow(0)
-        return
-    end
+local CM_HUD_ICON_W = 51    -- on/off toggle icon (matches tosfighter pvpmodeBtn 51x22)
+local CM_HUD_ICON_H = 22
+local CM_HUD_ICON_MARGIN = 12   -- gap from the right edge (keeps icon off the border)
+local CM_HUD_BTN_W = 120    -- toggle bar width == list panel width below
+local CM_HUD_BTN_H = 40
+local CM_HUD_ROW_H = 24
+local CM_HUD_GAP = 3
+local CM_HUD_PAD = 6
+local CM_HUD_ALPHA = 110    -- translucency (tosfighter uses ~50; lower = more see-through)
+local CM_HUD_POS_VER = 3    -- bump to re-apply the default start position on next load
+
+function CM_hud_get_rows()
     local presets = g.cupole_manager_settings.presets or {}
     local rows = {}
     for idx = 0, 9 do
         local p = presets[tostring(idx)]
         if p and p["1"] and p["2"] and p["3"] then
             local label = p.name and p.name ~= "" and p.name or ("Set " .. (idx + 1))
-            local names = {}
-            for s = 1, 3 do
-                local cls = GET_CUPOLE_BY_INDEX_IN_CLASSLIST(p[tostring(s)].id)
-                if cls then
-                    table.insert(names, TryGetProp(cls, "Dec_Name", "?"))
-                else
-                    table.insert(names, "?")
-                end
-            end
-            table.insert(rows, {idx = idx, label = label, detail = table.concat(names, " / ")})
+            table.insert(rows, {idx = idx, label = label})
         end
     end
-    if #rows == 0 then
-        ui.SysMsg("[Cupole Preset] No saved presets")
+    return rows
+end
+
+-- far-right edge, vertically centered (tosfighter-style)
+function CM_hud_default_pos(hud)
+    local sw = ui.GetClientInitialWidth()
+    local sh = ui.GetClientInitialHeight()
+    hud.x = sw - CM_HUD_BTN_W - 4
+    hud.y = math.floor(sh / 2) - math.floor(CM_HUD_BTN_H / 2)
+end
+
+-- reflect open/closed state on the toggle bar: ability on/off icon
+function CM_hud_set_toggle_visual(frame, open)
+    local icon = GET_CHILD(frame, "hud_icon")
+    if icon then
+        icon:SetImage((open == 1) and "ability_on" or "ability_off")
+    end
+    local label = GET_CHILD(frame, "hud_label")
+    if label then
+        local name = g.lang == "Japanese" and "クポル{nl}プリセット" or "Cupole{nl}Preset"
+        label:SetText("{s10}" .. name)   -- small, tosfighter-sized
+    end
+end
+
+-- destroy both HUD frames (used when leaving town)
+function CM_hud_destroy()
+    local names = { addonNameLower .. "_hud_panel", addonNameLower .. "_hud" }
+    for _, name in ipairs(names) do
+        if ui.GetFrame(name) then
+            ui.DestroyFrame(name)
+        end
+    end
+end
+
+-- creates the always-visible toggle button frame (idempotent)
+function CM_hud_create()
+    if not g.cupole_manager_settings then
+        return
+    end
+    local hud = g.cupole_manager_settings.hud
+    if not hud then
+        hud = { open = 0 }
+        g.cupole_manager_settings.hud = hud
+    end
+
+    -- (re)apply default start position when the layout version changes
+    if hud.ver ~= CM_HUD_POS_VER then
+        CM_hud_default_pos(hud)
+        hud.ver = CM_HUD_POS_VER
+        CM_save_settings()
+    end
+    -- heal invalid / off-screen positions
+    local sw = ui.GetClientInitialWidth()
+    local sh = ui.GetClientInitialHeight()
+    if type(hud.x) ~= "number" or type(hud.y) ~= "number" or
+        hud.x < 0 or hud.x > sw - 20 or hud.y < 0 or hud.y > sh - 20 then
+        CM_hud_default_pos(hud)
+        CM_save_settings()
+    end
+
+    local frame_name = addonNameLower .. "_hud"
+    local frame = ui.GetFrame(frame_name)
+    if not frame then
+        frame = ui.CreateNewFrame("notice_on_pc", frame_name, 0, 0, 0, 0)
+    end
+    AUTO_CAST(frame)
+    frame:RemoveAllChild()
+    frame:Resize(CM_HUD_BTN_W, CM_HUD_BTN_H)
+    frame:SetSkinName("bg2")          -- translucent bar background (with SetAlpha)
+    frame:SetTitleBarSkin("None")
+    frame:SetLayerLevel(90)
+    frame:EnableHittestFrame(1)
+    frame:EnableMove(1)
+    frame:SetPos(hud.x, hud.y)
+    frame:SetAlpha(CM_HUD_ALPHA)
+    -- drag: frame handles move + position save (LBUTTONUP fires on the frame
+    -- only when it was dragged; a plain click routes to the icon below)
+    frame:SetEventScript(ui.LBUTTONUP, "CM_hud_drag")
+
+    -- title label on the LEFT, two lines, vertically centered (tosfighter
+    -- style). Hit test OFF so drags on it pass through to the frame.
+    local label = frame:CreateOrGetControl("richtext", "hud_label", CM_HUD_BTN_W - CM_HUD_ICON_W - CM_HUD_ICON_MARGIN - 14, 30, ui.LEFT, ui.CENTER_VERT, 8, 0, 0, 0)
+    label:SetFontName("white_16_ol")
+    label:EnableHitTest(false)
+
+    -- clickable toggle icon on the RIGHT, vertically centered: a PICTURE (not a
+    -- button) so it does not capture the mouse and block frame dragging
+    -- (tosfighter/norisan pattern). Shows ability_on (open) / ability_off (closed).
+    -- args: w, h, gravH, gravV, marginLeft, marginTop, marginRight, marginBottom.
+    -- With ui.RIGHT the gap comes from marginRight (7th arg), NOT marginLeft.
+    local icon = frame:CreateOrGetControl("picture", "hud_icon", CM_HUD_ICON_W, CM_HUD_ICON_H, ui.RIGHT, ui.CENTER_VERT, 0, 0, CM_HUD_ICON_MARGIN, 0)
+    AUTO_CAST(icon)
+    icon:SetEnableStretch(1)
+    icon:EnableHitTest(1)
+    icon:SetTextTooltip(g.lang == "Japanese" and "{ol}クポルプリセット 開閉" or "{ol}Toggle Cupole presets")
+    icon:SetEventScript(ui.LBUTTONUP, "CM_hud_toggle")
+
+    CM_hud_set_toggle_visual(frame, hud.open)
+
+    frame:ShowWindow(1)
+
+    CM_hud_panel_render()
+end
+
+-- (re)builds or destroys the preset panel frame based on open state
+function CM_hud_panel_render()
+    local hud = g.cupole_manager_settings and g.cupole_manager_settings.hud
+    if not hud then
+        return
+    end
+    local panel_name = addonNameLower .. "_hud_panel"
+    if ui.GetFrame(panel_name) then
+        ui.DestroyFrame(panel_name)
+    end
+    if hud.open ~= 1 then
         return
     end
 
-    local row_h = 50
-    local padding = 12
-    local title_h = 45
-    local frame_w = 320
-    local frame_h = title_h + (#rows * row_h) + padding * 2
+    local rows = CM_hud_get_rows()
+    local n = #rows
+    local inner_h = (n == 0) and 22 or (n * (CM_HUD_ROW_H + CM_HUD_GAP) - CM_HUD_GAP)
+    local panel_w = CM_HUD_BTN_W                     -- same width as the toggle bar
+    local row_w = CM_HUD_BTN_W - CM_HUD_PAD * 2
+    local panel_h = inner_h + CM_HUD_PAD * 2
 
-    frame = ui.CreateNewFrame("notice_on_pc", frame_name, 0, 0, 0, 0)
-    AUTO_CAST(frame)
-    frame:RemoveAllChild()
-    frame:Resize(frame_w, frame_h)
-    frame:SetSkinName("None")
-    frame:SetTitleBarSkin("None")
-    frame:SetLayerLevel(100)
-    frame:EnableHittestFrame(1)
-    frame:EnableMove(1)
-
-    local sw = ui.GetClientInitialWidth()
     local sh = ui.GetClientInitialHeight()
-    frame:SetPos((sw - frame_w) / 2, (sh - frame_h) / 2)
-
-    local bg = frame:CreateOrGetControl("groupbox", "bg", frame_w, frame_h - 30, ui.LEFT, ui.TOP, 0, 30, 0, 0)
-    AUTO_CAST(bg)
-    bg:SetSkinName("test_frame_low")
-    bg:EnableHittestGroupBox(false)
-
-    local title_bg = frame:CreateOrGetControl("groupbox", "title_bg", frame_w, 50, ui.LEFT, ui.TOP, 0, 0, 0, 0)
-    AUTO_CAST(title_bg)
-    title_bg:SetSkinName("test_frame_top")
-    title_bg:EnableHittestGroupBox(false)
-
-    local title = frame:CreateOrGetControl("richtext", "title", 100, 30, ui.CENTER_HORZ, ui.TOP, 0, 18, 0, 0)
-    title:SetText("{@st43}{s18}Cupole Preset{/}")
-    title:EnableHitTest(false)
-
-    local close = frame:CreateOrGetControl("button", "close", 34, 34, ui.RIGHT, ui.TOP, 0, 14, 10, 0)
-    AUTO_CAST(close)
-    close:SetImage("testclose_button")
-    close:SetEventScript(ui.LBUTTONUP, "CM_preset_quick_frame_close")
-
-    for i, row in ipairs(rows) do
-        local y = title_h + padding + (i - 1) * row_h
-        local name_rt = frame:CreateOrGetControl("richtext", "qp_name_" .. i, padding, y, frame_w - 100, 20)
-        name_rt:SetText("{ol}{s14}{b}" .. row.label)
-        name_rt:EnableHitTest(false)
-
-        local detail_rt = frame:CreateOrGetControl("richtext", "qp_detail_" .. i, padding, y + 20, frame_w - 100, 20)
-        detail_rt:SetText("{ol}{s11}{#aaaaaa}" .. row.detail)
-        detail_rt:EnableHitTest(false)
-
-        local apply_btn = frame:CreateOrGetControl("button", "qp_apply_" .. i, frame_w - padding - 70, y + 8, 70, 30)
-        AUTO_CAST(apply_btn)
-        apply_btn:SetText("{ol}{s13}Apply")
-        apply_btn:SetUserValue("PRESET_INDEX", row.idx)
-        apply_btn:SetEventScript(ui.LBUTTONUP, "CM_preset_quick_apply")
-        apply_btn:SetOverSound("button_over")
-        apply_btn:SetClickSound("button_click_stats")
+    local px = hud.x
+    local py = hud.y + CM_HUD_BTN_H + 2
+    if py + panel_h > sh then
+        py = math.max(0, sh - panel_h)
     end
 
-    local esc_timer = frame:CreateOrGetControl("timer", "qp_esc_timer", 0, 0)
-    AUTO_CAST(esc_timer)
-    esc_timer:SetUpdateScript("CM_preset_quick_esc_check")
-    esc_timer:Start(0.05)
+    local panel = ui.CreateNewFrame("notice_on_pc", panel_name, 0, 0, 0, 0)
+    AUTO_CAST(panel)
+    panel:RemoveAllChild()
+    panel:Resize(panel_w, panel_h)
+    panel:SetSkinName("bg2")          -- translucent window background (with SetAlpha)
+    panel:SetTitleBarSkin("None")
+    panel:SetLayerLevel(90)
+    panel:EnableHittestFrame(1)
+    panel:EnableMove(0)
+    panel:SetPos(px, py)
+    panel:SetAlpha(CM_HUD_ALPHA)   -- translucent window (tosfighter pattern)
 
-    frame:ShowWindow(1)
+    if n == 0 then
+        local empty = panel:CreateOrGetControl("richtext", "empty", CM_HUD_PAD, CM_HUD_PAD, row_w, 20)
+        empty:SetText("{ol}{s12}{#aaaaaa}" ..
+                          (g.lang == "Japanese" and "プリセットなし" or "No presets"))
+        empty:EnableHitTest(false)
+    else
+        for i, row in ipairs(rows) do
+            local y = CM_HUD_PAD + (i - 1) * (CM_HUD_ROW_H + CM_HUD_GAP)
+            local rb = panel:CreateOrGetControl("button", "hud_apply_" .. i, CM_HUD_PAD, y, row_w, CM_HUD_ROW_H)
+            AUTO_CAST(rb)
+            rb:SetText("{ol}{s14}" .. row.label)
+            rb:SetUserValue("PRESET_INDEX", row.idx)
+            rb:SetEventScript(ui.LBUTTONUP, "CM_hud_apply")
+            rb:SetOverSound("button_over")
+            rb:SetClickSound("button_click_stats")
+        end
+    end
+
+    panel:ShowWindow(1)
 end
 
-function CM_preset_quick_frame_close()
-    local frame_name = addonNameLower .. "_quick"
-    local frame = ui.GetFrame(frame_name)
+function CM_hud_toggle()
+    local hud = g.cupole_manager_settings and g.cupole_manager_settings.hud
+    if not hud then
+        return
+    end
+    hud.open = (hud.open == 1) and 0 or 1
+    CM_save_settings()
+    -- update the toggle label in place (do not rebuild the frame handling this
+    -- click) then show/hide the panel
+    local frame = ui.GetFrame(addonNameLower .. "_hud")
     if frame then
-        frame:ShowWindow(0)
+        CM_hud_set_toggle_visual(frame, hud.open)
+    end
+    CM_hud_panel_render()
+end
+
+function CM_hud_drag(frame, ctrl)
+    if not frame then
+        return
+    end
+    local hud = g.cupole_manager_settings and g.cupole_manager_settings.hud
+    if not hud then
+        return
+    end
+    hud.x = frame:GetX()
+    hud.y = frame:GetY()
+    CM_save_settings()
+    -- keep the open panel attached under the button while dragging
+    if hud.open == 1 then
+        local panel = ui.GetFrame(addonNameLower .. "_hud_panel")
+        if panel then
+            local sh = ui.GetClientInitialHeight()
+            local py = hud.y + CM_HUD_BTN_H + 2
+            local ph = panel:GetHeight()
+            if py + ph > sh then
+                py = math.max(0, sh - ph)
+            end
+            panel:SetPos(hud.x, py)
+        end
     end
 end
 
-function CM_preset_quick_esc_check(frame)
-    if keyboard.IsKeyPressed("ESCAPE") == 1 then
-        CM_preset_quick_frame_close()
-    end
-end
-
-function CM_preset_quick_apply(parent, ctrl)
+function CM_hud_apply(parent, ctrl)
     local idx = ctrl:GetUserIValue("PRESET_INDEX")
-    CM_preset_quick_frame_close()
     CM_preset_apply_by_index(idx)
+end
+
+-- refresh HUD panel after presets change
+function CM_hud_refresh()
+    if g.cupole_manager_settings and g.cupole_manager_settings.hud then
+        CM_hud_panel_render()
+    end
 end
 
 -- ============================================================
