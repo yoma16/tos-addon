@@ -4,10 +4,10 @@
     "name": "Cupole manager",
     "file": "cupole_manager",
     "extension": "ipf",
-    "fileVersion": "v1.0.1",
-    "releaseTag": "v1.0.1",
+    "fileVersion": "v1.0.2",
+    "releaseTag": "v1.0.2",
     "unicode": "⛄",
-    "description": "큐폴 관리 애드온. 프리셋을 관리하고 쉽게 적용할 수 있습니다.<br> 변경이 완료되면 슬롯에 있는 큐폴 스킬도 맞춰서 변경해줍니다. <br> Cupole manager. You can manage cupole preset and apply them easy <br>the Cupole skill in your slot will automatically change to the Cupole skill in the center as well!!! ",
+    "description": "큐폴 관리 애드온. 프리셋을 관리하고 쉽게 적용할 수 있습니다.<br> 변경이 완료되면 슬롯에 있는 큐폴 스킬도 맞춰서 변경해줍니다.<br> v1.0.2: 마을에서 화면 오른쪽에 뜨는 프리셋 HUD(토글 바)로 저장된 프리셋을 바로 적용할 수 있습니다.<br> Cupole manager. You can manage cupole preset and apply them easy <br>the Cupole skill in your slot will automatically change to the Cupole skill in the center as well!!!<br> v1.0.2: apply saved presets from an on-screen HUD (a toggle bar shown at the right edge, in town only).",
     "tags": ["yomae", "cupole", "addons", "cupole manager", "cupole preset", "preset", "요매", "yoma16", "큐폴"]
   },
   {
