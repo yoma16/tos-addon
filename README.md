@@ -7,24 +7,25 @@ Tree of Savior용 **Cupole 프리셋/자동 소환 애드온**입니다.
 
 - 매번 수동으로 큐폴 조합을 맞추는 반복 작업 감소
 - 캐릭터별 세팅 + 기본(Default) 세팅 동시 관리
-- 빠른 적용 UI(`/cupole q`)로 전투 전 준비 시간 단축
+- 도시에서 항상 떠 있는 프리셋 HUD로 전투 전 준비 시간 단축
 - Norisan 메뉴 연동으로 접근성 개선
 
 ## 주요 기능
 
-- **자동 소환**: 도시(`MapType == City`) 진입 시 3슬롯 자동 보정
+- **자동 소환**: 도시(`MapType == City`) 진입 시 3슬롯(Center/Left/Right) 자동 보정
 - **기본 세트 저장**: 현재 3슬롯을 Default로 저장
 - **프리셋 10개 관리**: 이름 지정, 저장/불러오기/초기화
-- **퀵 프리셋 창**: 간소화된 목록에서 즉시 Apply
-- **설정 영속화**: JSON 파일에 안전 저장(tmp fallback 포함)
+- **프리셋 HUD**: 도시에서 화면 오른쪽에 뜨는 작은 토글 바 → 저장된 프리셋을 클릭 한 번으로 적용
+  (드래그로 위치 이동, 위치/열림 상태는 계정 단위로 저장)
+- **설정 영속화**: JSON 파일에 안전 저장(`.tmp` → rename 방식)
 - **스킬 퀵슬롯 보정**: 프리셋 적용 후 큐폴 액티브 스킬 스왑 시도
 
 ## 사용법
 
-1. 게임에서 `/cupole` 입력: 전체 프리셋 UI 열기
-2. `/cupole q` 또는 `/cupole quick`: 퀵 프리셋 UI 열기
+1. **Norisan 메뉴의 `Cupole Preset` 아이콘 클릭**: 전체 프리셋 UI 열기
+2. 같은 아이콘 **우클릭**: 프리셋 HUD 표시/숨기기 (도시에서만 표시)
 3. `Load Current`로 현재 장착 상태를 가져온 뒤 `Save`
-4. 원하는 탭에서 `Apply`로 즉시 소환 적용
+4. 원하는 탭에서 `Apply`로 즉시 소환 적용 (HUD에서는 프리셋 줄을 클릭하면 바로 적용)
 
 ## 저장 경로
 
@@ -36,11 +37,19 @@ Tree of Savior용 **Cupole 프리셋/자동 소환 애드온**입니다.
 ```text
 tos-addon/
 ├─ cupole_manager/
-│  ├─ cupole_manager.lua   # 메인 로직 (UI, 프리셋, 훅, 저장)
-│  └─ cupole_manager.xml   # UI 프레임 진입점
-├─ addons.json             # 매니페스트(현재 플레이스홀더)
+│  ├─ cupole_manager.lua   # 메인 로직 (UI, 프리셋, HUD, 훅, 저장)
+│  ├─ cupole_manager.xml   # UI 프레임 진입점
+│  ├─ _ipf/                # 배포용 .ipf 산출물
+│  └─ RELEASE_v1.0.2.md    # 릴리즈 노트
+├─ toggle_cupole_potion/   # 쿠폴 자동 물약 토글
+├─ auto_ads/               # 확성기/채팅 자동 전송
+├─ new_nexus_addons/       # Nexus Addons 번들 (yomae 포크)
+├─ addons.json             # 애드온 매니저용 매니페스트 (버전/릴리즈 태그/설명)
 └─ README.md
 ```
+
+> `ipf_maker/`(빌드 도구·산출물)와 일부 실험용 애드온 폴더는 git에 커밋하지 않는 로컬 전용입니다.
+> 배포는 GitHub Release 에셋(`.ipf`)으로만 합니다.
 
 ## Screenshot
 ![alt text](image.png)
