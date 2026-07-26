@@ -26,10 +26,10 @@
     "name": "New Nexus Addons",
     "file": "new_nexus_addons",
     "extension": "ipf",
-    "fileVersion": "v1.0.6",
-    "releaseTag": "new_nexus_addons_v-1.0.6",
+    "fileVersion": "v1.0.7",
+    "releaseTag": "new_nexus_addons_v-1.0.7",
     "unicode": "⛄",
-    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.0.6: Other Character Skill List에서 도시 진입마다 캐릭터가 사라지던 버그 수정(바락 목록 기준으로 정리). <br>yomae fork of norisan's Nexus Addons framework. <br>v1.0.6: fixed Other Character Skill List wiping stored characters on every city entry (now prunes by the barrack roster). <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.0.6: Other Character Skill Listで都市に入る度にキャラが消えるバグを修正(バラック一覧基準で整理)。",
+    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.0.7: Indun Panel 전체 크기를 80%로 축소(글씨/툴팁 포함), 창을 옮겨도 위치가 저장되지 않던 버그 수정, 테두리·정렬·간격 정리. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.0.7: scaled the whole Indun Panel down to 80% (fonts and tooltips included), fixed the panel position not being saved after a drag, and cleaned up its border, alignment and spacing. <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.0.7: Indun Panel全体を80%に縮小(文字・ツールチップ含む)、ドラッグしても位置が保存されないバグを修正、枠線・整列・余白を整理。",
     "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
   },
   {

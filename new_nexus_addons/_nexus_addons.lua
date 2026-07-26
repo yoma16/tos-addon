@@ -42,12 +42,13 @@
 -- 1.0.4 "CCH: per-set copy/save (save/copy one set at a time, copy sources shown by set number)"
 -- 1.0.5 "OCSL: fix settings frame not opening (lazy-load char data when opened outside a city)"
 -- 1.0.6 "OCSL: prune characters by the barrack roster instead of system_option pc_id (pc_id wiped valid chars on every city entry, leaving only the current char); auto-register current-layer chars"
+-- 1.0.7 "IP: scale the whole panel down to 80% (IP_SCALE) including font sizes (ip_f) and fix the frame position resetting to the default after every redraw (drag save was wired to the inverted move flag)"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.0.6"
+local ver = "1.0.7"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -2492,6 +2493,48 @@ end
 -- always_status ここまで
 
 -- indun_panel ここから
+-- レイアウト縮小率 (1.0 = 従来サイズ)。座標/サイズは全て ip_s() を通す
+local IP_SCALE = 0.8
+local function ip_s(v)
+    return math.floor(v * IP_SCALE + 0.5)
+end
+-- {sNN} は実在するフォントサイズのみ効く(無いサイズを書くと既定サイズのままになる)。
+-- 中途半端なサイズ(13/15 など)は別の書体に見えるので、クライアントで多用されている
+-- サイズだけに絞ってスナップする (10/12/14/16/18/20/22/24)
+local IP_FONT_SIZES = {10, 12, 14, 16, 18, 20, 22, 24}
+local function ip_f(v)
+    local scaled = ip_s(v)
+    local picked = IP_FONT_SIZES[1]
+    for _, size in ipairs(IP_FONT_SIZES) do
+        if size <= scaled then
+            picked = size
+        end
+    end
+    return string.format("{s%d}", picked)
+end
+-- ツールチップ用の共通プレフィクス (アウトライン + 縮小フォント)。暗い背景に出るので {ol} は必須
+local IP_TIP_OL = "{ol}" .. ip_f(16)
+-- 枠の見た目は cupole_manager の HUD と合わせる (cupole_manager.lua: SetSkinName("bg2") + SetAlpha(110))
+local IP_SKIN_DEFAULT = "bg2"
+local IP_ALPHA = 110
+local IP_BTN_GAP = ip_s(8) -- ボタン同士の最小間隔
+-- 内側余白。バーと設定フレームで同じ値を使い、左/上の余白を揃える
+local IP_PAD = ip_s(10)
+local IP_BTN_W = ip_s(105) -- 文字ボタン共通幅。"INDUNPANEL" が ip_f(16) で左右に余白を持って収まる幅
+local IP_BTN_H = ip_s(30)
+local IP_BTN_Y = IP_PAD -- バーも設定フレームも上余白は IP_PAD で統一
+local IP_BAR_H = IP_PAD * 2 + IP_BTN_H -- バー(閉じた状態)の高さ = 上下余白 + ボタン
+local IP_BTN_STEP = IP_BTN_W + IP_BTN_GAP * 2 -- 文字ボタンを並べる送り幅
+local IP_SET_W = ip_s(70) -- SET A/B/C は短いラベルなので細く (バー全体の横幅を詰める)
+local IP_SET_STEP = IP_SET_W + IP_BTN_GAP * 2
+local IP_ICON = ip_s(29) -- ショートカットアイコン共通サイズ
+local IP_ICON_Y = math.floor((IP_BAR_H - IP_ICON) / 2)
+local IP_ROW_H = ip_s(33) + ip_s(5) -- 行の送り。ボタン(IP_BTN_H)より広くして行間を空ける
+local IP_ROW_TOP = IP_BAR_H + ip_s(12) -- 1行目(challenge)をバーから離す
+local IP_ICON_GAP = ip_s(4) -- アイコン同士は文字ボタンより詰める
+local IP_ICON_STEP = ip_s(30) -- ショートカットアイコンを並べる送り幅
+-- 展開時のパネル最小幅。実際の幅はバーの実測値(g.indun_panel_bar_w)と比較して広い方を使う
+local IP_PANEL_W = ip_s(750)
 local induns = {{
     challenge = {
         solo_520 = 1001,
@@ -2713,7 +2756,7 @@ function Indun_panel_load_settings()
                 challenge_ticket = "month",
                 always_open = 0,
                 singularity_check = 0,
-                skin_name = "chat_window_2",
+                skin_name = IP_SKIN_DEFAULT,
                 en_ver = 0,
                 x = 665,
                 y = 30,
@@ -2789,6 +2832,14 @@ function Indun_panel_load_settings()
                 end
             end
         end
+    end
+    -- 旧デフォルト(chat_window_2)のままの環境を cupole HUD と同じ見た目へ一度だけ寄せる。
+    -- 以降ユーザーが SKIN SELECT で選び直した設定は尊重する
+    if settings.etc.skin_migrated ~= 1 then
+        if settings.etc.skin_name == "chat_window_2" then
+            settings.etc.skin_name = IP_SKIN_DEFAULT
+        end
+        settings.etc.skin_migrated = 1
     end
     g.indun_panel_settings = settings
     Indun_panel_save_settings()
@@ -3073,30 +3124,34 @@ function Indun_panel_frame_init(is_toggle, msg)
     ui.DestroyFrame(addon_name_lower .. "indun_panel_map")
     local indun_panel = ui.CreateNewFrame("notice_on_pc", addon_name_lower .. "indun_panel", 0, 0, 0, 0)
     AUTO_CAST(indun_panel)
-    indun_panel:SetSkinName('None')
+    -- 閉じた状態でも背景/枠を出す (展開時と同じスキン。SKIN SELECT の設定に追従)
+    indun_panel:SetSkinName(g.indun_panel_settings.etc.skin_name or IP_SKIN_DEFAULT)
+    indun_panel:SetAlpha(IP_ALPHA)
     indun_panel:SetLayerLevel(30)
     indun_panel:RemoveAllChild()
     Indun_panel_setup_frame(indun_panel)
-    local btn = indun_panel:CreateOrGetControl("button", "btn", 5, 5, 80, 30)
+    local btn = indun_panel:CreateOrGetControl("button", "btn", IP_PAD, IP_BTN_Y, IP_BTN_W, IP_BTN_H)
     AUTO_CAST(btn)
-    btn:SetText("{ol}{s10}INDUNPANEL")
+    btn:SetText("{ol}" .. ip_f(14) .. "INDUNPANEL")
     btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_frame_toggle")
     btn:SetEventScript(ui.RBUTTONUP, "Indun_panel_always_init")
     btn:SetEventScriptArgString(ui.RBUTTONUP, "OPEN")
-    btn:SetTextTooltip(g.lang == "Japanese" and "{ol}右クリック: 常時展開で開く" or
-                           "{ol}Right click: Open in Always Expand")
+    btn:SetTextTooltip(g.lang == "Japanese" and IP_TIP_OL .. "右クリック: 常時展開で開く" or
+                           IP_TIP_OL .. "Right click: Open in Always Expand")
     local x = Indun_panel_create_common_buttons(indun_panel)
     local button_keys = {"tos", "gabija", "vakarine", "rada", "jurate", "austeja", "pvp_mine", "market", "craft",
                          "leticia"}
+    local right = x - IP_ICON_GAP -- アイコンが1つも無い場合の右端
     for _, key_name in ipairs(button_keys) do
         local value = g.indun_panel_settings.cols[key_name]
         if value == 1 then
             if Indun_panel_create_shortcut_button(indun_panel, key_name, x) then
-                x = x + 30
+                right = x + IP_ICON
+                x = x + IP_ICON_STEP
             end
         end
     end
-    indun_panel:Resize(x, 40)
+    indun_panel:Resize(right + IP_PAD, IP_BAR_H)
     indun_panel:ShowWindow(1)
     if not is_toggle then
         if g.indun_panel_settings.etc.always_open == 1 then
@@ -3122,24 +3177,28 @@ function Indun_panel_setup_frame(indun_panel)
     indun_panel:EnableMove(enable)
     indun_panel:EnableHittestFrame(enable)
     if g.indun_panel_settings.etc.move == 1 then
-        indun_panel:SetEventScript(ui.LBUTTONUP, "Indun_panel_frame_drag")
-    else
         indun_panel:SetEventScript(ui.LBUTTONUP, "None")
+    else
+        indun_panel:SetEventScript(ui.LBUTTONUP, "Indun_panel_frame_drag")
     end
 end
 
 function Indun_panel_frame_drag(indun_panel)
-    g.indun_panel_settings.etc.x = indun_panel:GetX()
-    g.indun_panel_settings.etc.y = indun_panel:GetY()
+    local pos_x = indun_panel:GetX()
+    local pos_y = indun_panel:GetY()
+    if pos_x == g.indun_panel_settings.etc.x and pos_y == g.indun_panel_settings.etc.y then
+        return -- ドラッグしていない単純クリック
+    end
+    g.indun_panel_settings.etc.x = pos_x
+    g.indun_panel_settings.etc.y = pos_y
     Indun_panel_save_settings()
-    Indun_panel_frame_init()
 end
 
 function Indun_panel_create_common_buttons(indun_panel)
-    local ccbtn = indun_panel:CreateOrGetControl('button', 'ccbtn', 85, 5, 30, 30)
+    local ccbtn = indun_panel:CreateOrGetControl('button', 'ccbtn', IP_PAD + IP_BTN_W + IP_BTN_GAP * 3, IP_ICON_Y, IP_ICON, IP_ICON)
     AUTO_CAST(ccbtn)
     ccbtn:SetSkinName("None")
-    ccbtn:SetText("{img barrack_button_normal 30 30}")
+    ccbtn:SetText(string.format("{img barrack_button_normal %d %d}", IP_ICON, IP_ICON))
     local lbtn_action = "APPS_TRY_MOVE_BARRACK"
     local rbtn_action = nil
     local tooltip_parts = {}
@@ -3164,9 +3223,9 @@ function Indun_panel_create_common_buttons(indun_panel)
     if rbtn_action then
         ccbtn:SetEventScript(ui.RBUTTONUP, rbtn_action)
     end
-    local default_tooltip = g.lang == "Japanese" and "{ol}バラックに戻ります" or "{ol}Return to Barracks"
-    ccbtn:SetTextTooltip(#tooltip_parts > 0 and "{ol}" .. table.concat(tooltip_parts, "{nl}") or default_tooltip)
-    return 115 -- 次のボタンを開始するX座標を返す
+    local default_tooltip = g.lang == "Japanese" and IP_TIP_OL .. "バラックに戻ります" or IP_TIP_OL .. "Return to Barracks"
+    ccbtn:SetTextTooltip(#tooltip_parts > 0 and IP_TIP_OL .. table.concat(tooltip_parts, "{nl}") or default_tooltip)
+    return IP_PAD + IP_BTN_W + IP_BTN_GAP * 3 + IP_ICON + IP_ICON_GAP -- 次のボタンを開始するX座標を返す
 end
 
 function Indun_panel_create_shortcut_button(indun_panel, key_name, x)
@@ -3175,66 +3234,66 @@ function Indun_panel_create_shortcut_button(indun_panel, key_name, x)
     local tooltip_msg = ""
     local btn = nil
     if key_name == "tos" and g.get_map_type() == "City" then
-        btn = indun_panel:CreateOrGetControl("button", "tos", x + 2, 8, 25, 25)
-        btn:SetText("{img icon_item_Tos_Event_Coin 25 25}")
-        tooltip_msg = g.lang == "Japanese" and "{ol}TOSイベントショップ" or "{ol}TOS Event Shop"
+        btn = indun_panel:CreateOrGetControl("button", "tos", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img icon_item_Tos_Event_Coin %d %d}", IP_ICON, IP_ICON))
+        tooltip_msg = g.lang == "Japanese" and IP_TIP_OL .. "TOSイベントショップ" or IP_TIP_OL .. "TOS Event Shop"
         btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_event_tos_whole_shop_open")
     elseif key_name == "gabija" and g.get_map_type() == "City" then
-        btn = indun_panel:CreateOrGetControl("button", "gabija", x, 7, 29, 29)
-        btn:SetText("{img goddess_shop_btn 29 29}")
+        btn = indun_panel:CreateOrGetControl("button", "gabija", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img goddess_shop_btn %d %d}", IP_ICON, IP_ICON))
         coin_count = GET_COMMAED_STRING(TryGetProp(account_obj, "GabijaCertificate", "0"))
         tooltip_msg =
-            (g.lang == "Japanese" and "{ol}ガビヤショップ{nl}" or "{ol}Gabija Shop{nl}") .. "{#FFFF00}" ..
+            (g.lang == "Japanese" and IP_TIP_OL .. "ガビヤショップ{nl}" or IP_TIP_OL .. "Gabija Shop{nl}") .. "{#FFFF00}" ..
                 coin_count
         btn:SetEventScript(ui.LBUTTONUP, "REQ_GabijaCertificate_SHOP_OPEN")
     elseif key_name == "vakarine" and g.get_map_type() == "City" then
-        btn = indun_panel:CreateOrGetControl("button", "vakarine", x, 7, 29, 29)
-        btn:SetText("{img goddess2_shop_btn 29 29}")
+        btn = indun_panel:CreateOrGetControl("button", "vakarine", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img goddess2_shop_btn %d %d}", IP_ICON, IP_ICON))
         coin_count = GET_COMMAED_STRING(TryGetProp(account_obj, "VakarineCertificate", "0"))
-        tooltip_msg = (g.lang == "Japanese" and "{ol}ヴァカリネショップ{nl}" or "{ol}Vakarine Shop{nl}") ..
+        tooltip_msg = (g.lang == "Japanese" and IP_TIP_OL .. "ヴァカリネショップ{nl}" or IP_TIP_OL .. "Vakarine Shop{nl}") ..
                           "{#FFFF00}" .. coin_count
         btn:SetEventScript(ui.LBUTTONUP, "REQ_VakarineCertificate_SHOP_OPEN")
     elseif key_name == "rada" and g.get_map_type() == "City" then
-        btn = indun_panel:CreateOrGetControl("button", "rada", x, 8, 29, 29)
-        btn:SetText("{img goddess3_shop_btn 29 29}")
+        btn = indun_panel:CreateOrGetControl("button", "rada", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img goddess3_shop_btn %d %d}", IP_ICON, IP_ICON))
         coin_count = GET_COMMAED_STRING(TryGetProp(account_obj, "RadaCertificate", "0"))
-        tooltip_msg = (g.lang == "Japanese" and "{ol}ラダショップ{nl}" or "{ol}Rada Shop{nl}") .. "{#FFFF00}" ..
+        tooltip_msg = (g.lang == "Japanese" and IP_TIP_OL .. "ラダショップ{nl}" or IP_TIP_OL .. "Rada Shop{nl}") .. "{#FFFF00}" ..
                           coin_count
         btn:SetEventScript(ui.LBUTTONUP, "REQ_RadaCertificate_SHOP_OPEN")
     elseif key_name == "jurate" and g.get_map_type() == "City" then
-        btn = indun_panel:CreateOrGetControl("button", "jurate", x, 7, 29, 29)
-        btn:SetText("{img goddess4_shop_btn 29 29}")
+        btn = indun_panel:CreateOrGetControl("button", "jurate", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img goddess4_shop_btn %d %d}", IP_ICON, IP_ICON))
         coin_count = GET_COMMAED_STRING(TryGetProp(account_obj, "JurateCertificate", "0"))
         tooltip_msg =
-            (g.lang == "Japanese" and "{ol}ユラテショップ{nl}" or "{ol}Jurate Shop{nl}") .. "{#FFFF00}" ..
+            (g.lang == "Japanese" and IP_TIP_OL .. "ユラテショップ{nl}" or IP_TIP_OL .. "Jurate Shop{nl}") .. "{#FFFF00}" ..
                 coin_count
         btn:SetEventScript(ui.LBUTTONUP, "REQ_JurateCertificate_SHOP_OPEN")
     elseif key_name == "austeja" then
-        btn = indun_panel:CreateOrGetControl("button", "austeja", x, 7, 29, 29)
-        btn:SetText("{img goddess5_shop_btn 29 29}")
+        btn = indun_panel:CreateOrGetControl("button", "austeja", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img goddess5_shop_btn %d %d}", IP_ICON, IP_ICON))
         coin_count = GET_COMMAED_STRING(TryGetProp(account_obj, "AustejaCertificate", "0"))
-        tooltip_msg = (g.lang == "Japanese" and "{ol}アウステヤショップ{nl}" or "{ol}Austeja Shop{nl}") ..
+        tooltip_msg = (g.lang == "Japanese" and IP_TIP_OL .. "アウステヤショップ{nl}" or IP_TIP_OL .. "Austeja Shop{nl}") ..
                           "{#FFFF00}" .. coin_count
         btn:SetEventScript(ui.LBUTTONUP, "REQ_AustejaCertificate_SHOP_OPEN")
     elseif key_name == "pvp_mine" then
-        btn = indun_panel:CreateOrGetControl("button", "pvp_mine", x, 7, 29, 29)
-        btn:SetText("{img pvpmine_shop_btn_total 29 29}")
-        tooltip_msg = g.lang == "Japanese" and "{ol}傭兵団ショップ" or "{ol}Mercenary Shop"
+        btn = indun_panel:CreateOrGetControl("button", "pvp_mine", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img pvpmine_shop_btn_total %d %d}", IP_ICON, IP_ICON))
+        tooltip_msg = g.lang == "Japanese" and IP_TIP_OL .. "傭兵団ショップ" or IP_TIP_OL .. "Mercenary Shop"
         btn:SetEventScript(ui.LBUTTONUP, "MINIMIZED_PVPMINE_SHOP_BUTTON_CLICK")
     elseif key_name == "market" and g.get_map_type() == "City" then
-        btn = indun_panel:CreateOrGetControl("button", "market", x, 6, 29, 29)
-        btn:SetText("{img market_shortcut_btn02 29 29}")
-        tooltip_msg = g.lang == "Japanese" and "{ol}マーケット" or "{ol}Market"
+        btn = indun_panel:CreateOrGetControl("button", "market", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img market_shortcut_btn02 %d %d}", IP_ICON, IP_ICON))
+        tooltip_msg = g.lang == "Japanese" and IP_TIP_OL .. "マーケット" or IP_TIP_OL .. "Market"
         btn:SetEventScript(ui.LBUTTONUP, "MINIMIZED_MARKET_BUTTON_CLICK")
     elseif key_name == "craft" and g.get_map_type() == "City" then
-        btn = indun_panel:CreateOrGetControl("button", "craft", x, 5, 29, 29)
-        btn:SetText("{img icon_fullscreen_menu_equipment_processing 28 28}")
-        tooltip_msg = g.lang == "Japanese" and "{ol}装備加工" or "{ol}Equipment Processing"
+        btn = indun_panel:CreateOrGetControl("button", "craft", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img icon_fullscreen_menu_equipment_processing %d %d}", IP_ICON, IP_ICON))
+        tooltip_msg = g.lang == "Japanese" and IP_TIP_OL .. "装備加工" or IP_TIP_OL .. "Equipment Processing"
         btn:SetEventScript(ui.LBUTTONUP, "FULLSCREEN_NAVIGATION_MENU_DEATIL_EQUIPMENT_PROCESSING_NPC")
     elseif key_name == "leticia" and g.get_map_type() == "City" then
-        btn = indun_panel:CreateOrGetControl("button", "leticia", x, 5, 29, 29)
-        btn:SetText("{img icon_fullscreen_menu_letica 28 28}")
-        tooltip_msg = g.lang == "Japanese" and "{ol}レティーシャへ移動" or "{ol}Leticia Move"
+        btn = indun_panel:CreateOrGetControl("button", "leticia", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img icon_fullscreen_menu_letica %d %d}", IP_ICON, IP_ICON))
+        tooltip_msg = g.lang == "Japanese" and IP_TIP_OL .. "レティーシャへ移動" or IP_TIP_OL .. "Leticia Move"
         btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_FULLSCREEN_NAVIGATION_MENU_DETAIL_MOVE_NPC")
         btn:SetEventScriptArgNumber(ui.LBUTTONUP, 309)
     end
@@ -3320,7 +3379,7 @@ function Indun_panel_always_init(indun_panel, ctrl, str)
 end
 
 function Indun_panel_frame_toggle(indun_panel)
-    if indun_panel:GetHeight() > 40 then
+    if indun_panel:GetHeight() > IP_BAR_H then
         Indun_panel_frame_init(true)
     else
         Indun_panel_frame_open(indun_panel)
@@ -3330,55 +3389,58 @@ end
 function Indun_panel_frame_open(indun_panel)
     indun_panel:RemoveAllChild()
     Indun_panel_setup_frame(indun_panel)
-    local btn = indun_panel:CreateOrGetControl("button", "btn", 5, 5, 80, 30)
+    local btn = indun_panel:CreateOrGetControl("button", "btn", IP_PAD, IP_BTN_Y, IP_BTN_W, IP_BTN_H)
     AUTO_CAST(btn)
-    btn:SetText("{ol}{s10}INDUNPANEL")
+    btn:SetText("{ol}" .. ip_f(14) .. "INDUNPANEL")
     btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_frame_toggle")
     btn:SetEventScript(ui.RBUTTONUP, "Indun_panel_always_init")
-    btn:SetTextTooltip(g.lang == "Japanese" and "{ol}右クリック: 常時展開解除で閉じる" or
-                           "{ol}Right click: Close with permanent unexpand")
+    btn:SetTextTooltip(g.lang == "Japanese" and IP_TIP_OL .. "右クリック: 常時展開解除で閉じる" or
+                           IP_TIP_OL .. "Right click: Close with permanent unexpand")
     local x = Indun_panel_create_common_buttons(indun_panel)
-    local configbtn = indun_panel:CreateOrGetControl('button', 'configbtn', x, 5, 30, 30)
+    local configbtn = indun_panel:CreateOrGetControl('button', 'configbtn', x, IP_ICON_Y, IP_ICON, IP_ICON)
     AUTO_CAST(configbtn)
     configbtn:SetSkinName("None")
-    configbtn:SetText("{img config_button_normal 30 30}")
+    configbtn:SetText(string.format("{img config_button_normal %d %d}", IP_ICON, IP_ICON))
     configbtn:SetEventScript(ui.LBUTTONUP, "Indun_panel_setting_frame_open")
-    configbtn:SetTextTooltip(g.lang == "Japanese" and "{ol}Indun Panel 設定" or "{ol}Indun Panel Config")
-    x = x + 30
+    configbtn:SetTextTooltip(g.lang == "Japanese" and IP_TIP_OL .. "Indun Panel 設定" or IP_TIP_OL .. "Indun Panel Config")
+    x = x + IP_ICON + IP_ICON_GAP
     local button_keys = {"tos", "gabija", "vakarine", "rada", "jurate", "austeja", "pvp_mine", "market", "craft",
                          "leticia"}
     for _, key_name in ipairs(button_keys) do
         local value = g.indun_panel_settings.cols[key_name]
         if value == 1 then
             if Indun_panel_create_shortcut_button(indun_panel, key_name, x) then
-                x = x + 30
+                x = x + IP_ICON_STEP
             end
         end
     end
-    local current_x = x + 10 -- SET A の開始位置
+    local current_x = x + ip_s(10) -- SET A の開始位置
     for _, item in ipairs(g.indun_panel_settings.set_names) do
         for key, name in pairs(item) do
-            local btn = indun_panel:CreateOrGetControl("button", key, current_x, 5, 80, 30)
+            local btn = indun_panel:CreateOrGetControl("button", key, current_x, IP_BTN_Y, IP_SET_W, IP_BTN_H)
             AUTO_CAST(btn)
-            btn:Resize(80, 30)
-            btn:SetText("{ol}" .. name)
-            btn:Resize(80, 30)
-            btn:AdjustFontSizeByWidth(80)
+            btn:Resize(IP_SET_W, IP_BTN_H)
+            btn:SetText("{ol}" .. ip_f(16) .. name)
+            btn:Resize(IP_SET_W, IP_BTN_H)
+            btn:AdjustFontSizeByWidth(IP_SET_W)
             btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_set_toggle")
             btn:SetEventScriptArgString(ui.LBUTTONUP, key) -- "set_a" を渡す
             btn:SetEventScriptArgNumber(ui.LBUTTONUP, 0) -- 0 を渡す (ArgNumberにする)
             if g.indun_panel_settings.etc.use_set == key then
                 btn:SetSkinName("test_red_button")
+                btn:Resize(IP_SET_W, IP_BTN_H) -- スキン適用でサイズがリセットされるので再指定
             end
-            current_x = current_x + 85
+            current_x = current_x + IP_SET_STEP
         end
     end
-    local always_open = indun_panel:CreateOrGetControl('checkbox', 'always_open', 710, 5, 30, 30)
+    -- SET ボタンの右隣に置く (固定X座標だとボタン数/間隔が変わった時に重なる)
+    local always_open = indun_panel:CreateOrGetControl('checkbox', 'always_open', current_x + IP_BTN_GAP, IP_ICON_Y,
+        IP_ICON, IP_ICON)
     AUTO_CAST(always_open)
     always_open:SetCheck(g.indun_panel_settings.etc.always_open)
     always_open:SetEventScript(ui.LBUTTONUP, "Indun_panel_ischecked")
-    always_open:SetTextTooltip(g.lang == "Japanese" and "{ol}チェックすると常時展開" or
-                                   "{ol}IsCheck AlwaysOpen")
+    always_open:SetTextTooltip(g.lang == "Japanese" and IP_TIP_OL .. "チェックすると常時展開" or
+                                   IP_TIP_OL .. "IsCheck AlwaysOpen")
     local function indun_panel_FIELD_BOSS_TIME_TAB_SETTING()
         local induninfo = ui.GetFrame("induninfo")
         local field_boss_ranking_control = GET_CHILD_RECURSIVELY(induninfo, "field_boss_ranking_control")
@@ -3397,8 +3459,9 @@ function Indun_panel_frame_open(indun_panel)
     if g.indun_panel_settings[current_set] and g.indun_panel_settings[current_set].jsr == 1 then
         indun_panel_FIELD_BOSS_TIME_TAB_SETTING()
     end
-    local final_x = current_x + 30
-    indun_panel:Resize(final_x, 40)
+    local final_x = current_x + IP_BTN_GAP + IP_ICON + IP_PAD
+    g.indun_panel_bar_w = final_x -- 展開時のパネル幅計算に使う (Indun_panel_frame_contents)
+    indun_panel:Resize(final_x, IP_BAR_H)
     indun_panel:ShowWindow(1)
     Indun_panel_frame_contents(configbtn)
     configbtn:RunUpdateScript("Indun_panel_frame_contents", 1.0)
@@ -3442,35 +3505,35 @@ function Indun_panel_setting_frame_open() -- Indun_list_viewer_save_current_char
     indun_panel:SetSkinName("test_frame_low")
     indun_panel:SetLayerLevel(90)
     indun_panel:EnableHittestFrame(1)
-    indun_panel:SetAlpha(100)
+    indun_panel:SetAlpha(IP_ALPHA)
     indun_panel:RemoveAllChild()
     indun_panel:ShowWindow(1)
-    local close = indun_panel:CreateOrGetControl('button', 'close', 0, 0, 30, 30)
-    AUTO_CAST(close)
-    close:SetImage("testclose_button")
-    close:SetGravity(ui.RIGHT, ui.TOP)
-    close:SetEventScript(ui.LBUTTONUP, "Indun_panel_frame_init")
-    local btn = indun_panel:CreateOrGetControl("button", "btn", 5, 5, 80, 30)
+    -- 上段は IP_PAD から順に並べる (固定X座標だとボタン幅を変えた時に重なる)
+    -- close は幅が確定してから最後に配置する (SetGravity だと上段の行と縦がズレる)
+    local btn = indun_panel:CreateOrGetControl("button", "btn", IP_PAD, IP_BTN_Y, IP_BTN_W, IP_BTN_H)
     AUTO_CAST(btn)
-    btn:SetText("{ol}{s10}INDUNPANEL")
-    btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_frame_init")
-    local position = indun_panel:CreateOrGetControl("button", "position", 90, 5, 60, 30)
+    btn:SetText("{ol}" .. ip_f(14) .. "INDUNPANEL")
+    -- 設定を開く前の状態(展開表示)に戻す。close(X) は従来どおり畳む
+    btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_frame_open")
+    btn:SetTextTooltip(g.lang == "Japanese" and IP_TIP_OL .. "展開表示に戻る" or IP_TIP_OL .. "Back to the panel")
+    local position = indun_panel:CreateOrGetControl("button", "position", IP_PAD + IP_BTN_STEP, IP_BTN_Y, IP_BTN_W,
+        IP_BTN_H)
     AUTO_CAST(position)
-    position:SetText("{ol}{s10}BASE POS")
+    position:SetText("{ol}" .. ip_f(16) .. "BASE POS")
     position:SetEventScript(ui.LBUTTONUP, "Indun_panel_frame_base_position")
-    position:SetTextTooltip(g.lang == "Japanese" and "{ol}ボタンを元の位置に戻す" or "Reset button position")
-    local x = 200
+    position:SetTextTooltip(g.lang == "Japanese" and IP_TIP_OL .. "ボタンを元の位置に戻す" or IP_TIP_OL .. "Reset button position")
+    local x = IP_PAD + IP_BTN_STEP * 2
     for _, item in ipairs(g.indun_panel_settings.set_names) do
         for key, name in pairs(item) do
-            local btn = indun_panel:CreateOrGetControl("button", name .. key, x, 5, 80, 30)
+            local btn = indun_panel:CreateOrGetControl("button", name .. key, x, IP_BTN_Y, IP_SET_W, IP_BTN_H)
             AUTO_CAST(btn)
-            btn:Resize(80, 30)
-            btn:SetText("{ol}" .. name)
-            btn:Resize(80, 30)
-            btn:AdjustFontSizeByWidth(80)
+            btn:Resize(IP_SET_W, IP_BTN_H)
+            btn:SetText("{ol}" .. ip_f(16) .. name)
+            btn:Resize(IP_SET_W, IP_BTN_H)
+            btn:AdjustFontSizeByWidth(IP_SET_W)
             btn:SetTextTooltip(g.lang == "Japanese" and
-                                   "{ol}左クリック: セット選択{nl}右クリック: セット名変更" or
-                                   "{ol}Left Click: Select Set{nl}Right Click: Change Set Name")
+                                   IP_TIP_OL .. "左クリック: セット選択{nl}右クリック: セット名変更" or
+                                   IP_TIP_OL .. "Left Click: Select Set{nl}Right Click: Change Set Name")
             btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_set_toggle")
             btn:SetEventScriptArgString(ui.LBUTTONUP, key)
             btn:SetEventScriptArgNumber(ui.LBUTTONUP, 1)
@@ -3478,16 +3541,20 @@ function Indun_panel_setting_frame_open() -- Indun_list_viewer_save_current_char
             btn:SetEventScriptArgString(ui.RBUTTONUP, key)
             if g.indun_panel_settings.etc.use_set == key then
                 btn:SetSkinName("test_red_button")
+                btn:Resize(IP_SET_W, IP_BTN_H) -- スキン適用でサイズがリセットされるので再指定
             end
-            x = x + 85
+            x = x + IP_SET_STEP
         end
     end
-    local skin_change = indun_panel:CreateOrGetControl("button", "skin_change", 470, 5, 80, 30)
+    -- ラベルが長いので他より幅広に (AdjustFontSizeByWidth だと文字が極端に小さくなる)
+    local skin_w = ip_s(125)
+    local skin_change = indun_panel:CreateOrGetControl("button", "skin_change", x, IP_BTN_Y, skin_w, IP_BTN_H)
     AUTO_CAST(skin_change)
-    local skin_text = g.lang == "Japanese" and "{ol}フレームスキン選択" or "{ol}Select Frame Skin"
+    local skin_text = g.lang == "Japanese" and IP_TIP_OL .. "フレームスキン選択" or IP_TIP_OL .. "Select Frame Skin"
     skin_change:SetEventScript(ui.LBUTTONUP, "Indun_panel_frame_skin_select")
-    skin_change:SetText("{ol}SKIN SELECT")
+    skin_change:SetText("{ol}" .. ip_f(16) .. "SKIN SELECT")
     skin_change:SetTextTooltip(skin_text)
+    local top_row_right = x + skin_w
     local shortcut_icons = {{ -- ショートカットアイコンのチェックボックス作成をループ処理に
         name = "tos",
         img = "icon_item_Tos_Event_Coin",
@@ -3529,14 +3596,17 @@ function Indun_panel_setting_frame_open() -- Indun_list_viewer_save_current_char
         img = "icon_fullscreen_menu_letica",
         size = 28
     }}
-    local config_x = 15
-    local tooltip_always_show = g.lang == "Japanese" and "{ol}チェックすると常に表示" or
-                                    "{ol}Always visible when checked"
+    -- 上段ボタンの下から順に積む。チェックボックスは枠(スキン依存で縮まない)+画像の幅を取るので、
+    -- 実測値 config_x をフレーム幅の計算にそのまま使う (足りないと最後の leticia が切れる)
+    local icon_row_y = IP_PAD + IP_BTN_H + IP_BTN_GAP
+    local config_x = IP_PAD
+    local tooltip_always_show = g.lang == "Japanese" and IP_TIP_OL .. "チェックすると常に表示" or
+                                    IP_TIP_OL .. "Always visible when checked"
     for _, icon_info in ipairs(shortcut_icons) do
-        local checkbox = indun_panel:CreateOrGetControl("checkbox", icon_info.name, config_x, 47, icon_info.size,
-            icon_info.size)
+        local checkbox = indun_panel:CreateOrGetControl("checkbox", icon_info.name, config_x, icon_row_y, IP_ICON,
+            IP_ICON)
         AUTO_CAST(checkbox)
-        checkbox:SetText(string.format("{img %s %d %d}", icon_info.img, icon_info.size, icon_info.size))
+        checkbox:SetText(string.format("{img %s %d %d}", icon_info.img, IP_ICON, IP_ICON))
         checkbox:SetEventScript(ui.LBUTTONUP, "Indun_panel_ischecked")
         checkbox:SetEventScriptArgString(ui.LBUTTONUP, "config")
         checkbox:SetTextTooltip(tooltip_always_show)
@@ -3548,44 +3618,46 @@ function Indun_panel_setting_frame_open() -- Indun_list_viewer_save_current_char
             end
         end
         checkbox:SetCheck(is_checked)
-        config_x = config_x + checkbox:GetWidth() + 5
+        config_x = config_x + checkbox:GetWidth() + ip_s(5)
     end
-    local label_line2 = indun_panel:CreateControl('labelline', 'label_line2', 10, 77, config_x, 5)
+    local line2_y = icon_row_y + IP_ICON + IP_BTN_GAP
+    local label_line2 = indun_panel:CreateControl('labelline', 'label_line2', IP_PAD, line2_y, config_x - IP_PAD,
+        ip_s(5))
     AUTO_CAST(label_line2)
     label_line2:SetSkinName("labelline2")
     local other_settings = {{ -- その他の設定チェックボックス作成をループ処理に
         name = "en_ver",
-        y = 85,
         jp = "チェックすると英語表示に変更します",
         en = "Check to display to English"
     }, {
         name = "move",
-        y = 120,
         jp = "チェックするとフレームを固定",
         en = "Check to fixes the frame"
     }, {
         name = "field_mode",
-        y = 155,
         jp = "チェックするとフィールドで表示",
         en = "Check to display in field"
     }, {
         name = "shading",
-        y = 190,
         jp = "チェックすると網掛け表示",
         en = "Check to display shading"
     }}
-    for _, setting_info in ipairs(other_settings) do
-        local checkbox = indun_panel:CreateOrGetControl('checkbox', setting_info.name, 25, setting_info.y, 25, 25)
+    local check_y = line2_y + IP_BTN_GAP + ip_s(5)
+    local check_pitch = ip_s(35)
+    for i, setting_info in ipairs(other_settings) do
+        local checkbox = indun_panel:CreateOrGetControl('checkbox', setting_info.name, IP_PAD,
+            check_y + (i - 1) * check_pitch, ip_s(25), ip_s(25))
         AUTO_CAST(checkbox)
         checkbox:SetCheck(g.indun_panel_settings.etc[setting_info.name])
         checkbox:SetEventScript(ui.LBUTTONUP, "Indun_panel_ischecked")
-        checkbox:SetText(g.lang == "Japanese" and "{ol}" .. setting_info.jp or "{ol}" .. setting_info.en)
+        checkbox:SetText(g.lang == "Japanese" and "{ol}" .. ip_f(16) .. setting_info.jp or "{ol}" .. ip_f(16) .. setting_info.en)
     end
-    local label_line = indun_panel:CreateControl('labelline', 'label_line', 10, 215, config_x, 5)
+    local line_y = check_y + check_pitch * (#other_settings - 1) + ip_s(25) + IP_BTN_GAP
+    local label_line = indun_panel:CreateControl('labelline', 'label_line', IP_PAD, line_y, config_x - IP_PAD, ip_s(5))
     AUTO_CAST(label_line)
     label_line:SetSkinName("labelline2")
-    local posy_left = 220
-    local posy_right = 220
+    local posy_left = line_y + IP_BTN_GAP + ip_s(5)
+    local posy_right = posy_left
     local count = #induns
     local half_count = math.ceil(count / 2)
     local current_set = g.indun_panel_settings.etc.use_set
@@ -3595,13 +3667,13 @@ function Indun_panel_setting_frame_open() -- Indun_list_viewer_save_current_char
         for key, value in pairs(entry) do
             local checkbox
             if i <= half_count then
-                checkbox = indun_panel:CreateOrGetControl('checkbox', key, 15, posy_left, 25, 25)
+                checkbox = indun_panel:CreateOrGetControl('checkbox', key, IP_PAD, posy_left, ip_s(25), ip_s(25))
                 AUTO_CAST(checkbox)
-                posy_left = posy_left + 35
+                posy_left = posy_left + ip_s(35)
             else
-                checkbox = indun_panel:CreateOrGetControl('checkbox', key, 325, posy_right, 25, 25)
+                checkbox = indun_panel:CreateOrGetControl('checkbox', key, ip_s(325), posy_right, ip_s(25), ip_s(25))
                 AUTO_CAST(checkbox)
-                posy_right = posy_right + 35
+                posy_right = posy_right + ip_s(35)
             end
             local is_checked = use_tbl[key]
             if is_checked == nil then
@@ -3614,12 +3686,42 @@ function Indun_panel_setting_frame_open() -- Indun_list_viewer_save_current_char
             if bool and value.jp then
                 display_name = value.jp
             end
-            checkbox:SetText(bool and "{ol}{#FFFFFF}{s16}" .. display_name or "{ol}{#FFFFFF}{s20}" .. key)
-            checkbox:SetTextTooltip(g.lang == "Japanese" and "チェックすると表示" or "Check to show")
+            checkbox:SetText(bool and "{ol}{#FFFFFF}" .. ip_f(16) .. display_name or "{ol}{#FFFFFF}" .. ip_f(18) .. key)
+            checkbox:SetTextTooltip(g.lang == "Japanese" and IP_TIP_OL .. "チェックすると表示" or IP_TIP_OL .. "Check to show")
         end
     end
     local final_height = math.max(posy_left, posy_right)
-    indun_panel:Resize(660, final_height + 5)
+    -- 幅は実測: アイコン行の右端 / 上段(SKIN + closeボタン分) / 右カラムのラベル幅 の最大 + 右余白
+    local frame_w = math.max(config_x, top_row_right + IP_BTN_GAP * 2 + IP_BTN_H, ip_s(325) + ip_s(300)) + IP_PAD
+    local frame_h = final_height + IP_PAD
+    indun_panel:Resize(frame_w, frame_h)
+    -- 設定フレームはバーより大きいので、そのままだと画面右/下にはみ出して close ボタンが見えなくなる。
+    -- cupole_manager の HUD パネルと同じく画面内に収める (閉じると setup_frame が保存位置に戻す)
+    local screen = ui.GetFrame("map")
+    if screen then
+        local sw = screen:GetWidth()
+        local sh = screen:GetHeight()
+        local px = indun_panel:GetX()
+        local py = indun_panel:GetY()
+        if px + frame_w > sw then
+            px = math.max(0, sw - frame_w)
+        end
+        if py + frame_h > sh then
+            py = math.max(0, sh - frame_h)
+        end
+        indun_panel:SetPos(px, py)
+    end
+    -- close は右上。上段ボタンと縦中央を揃える (SetGravity だと枠の角に貼り付いてズレる)。
+    -- SetImage は画像を元サイズ(約30px)で描くのでコントロール幅を無視して右下にはみ出す。
+    -- ccbtn/configbtn と同じく {img name W H} テキストで描かせるとサイズが正確に効く
+    local close_sz = ip_s(25)
+    local close = indun_panel:CreateOrGetControl('button', 'close', frame_w - IP_PAD - close_sz,
+        IP_BTN_Y + math.floor((IP_BTN_H - close_sz) / 2), close_sz, close_sz)
+    AUTO_CAST(close)
+    close:SetSkinName("None")
+    close:SetText(string.format("{img testclose_button %d %d}", close_sz, close_sz))
+    close:SetTextTooltip(g.lang == "Japanese" and IP_TIP_OL .. "設定を閉じる" or IP_TIP_OL .. "Close Config")
+    close:SetEventScript(ui.LBUTTONUP, "Indun_panel_frame_init")
 end
 
 function Indun_panel_frame_base_position(indun_panel)
@@ -3715,7 +3817,7 @@ function Indun_panel_frame_contents(configbtn)
             AUTO_CAST(btn)
             local count = GET_COMMAED_STRING(TryGetProp(account_obj, shop_props[i], "0"))
             local name = g.lang == "Japanese" and shop_names_jp[i] or shop_names_en[i]
-            local tooltip = string.format("{ol}%s{nl}{#FFFF00}%s", name, count)
+            local tooltip = string.format(IP_TIP_OL .. "%s{nl}{#FFFF00}%s", name, count)
             btn:SetTextTooltip(tooltip)
         end
     end
@@ -3723,13 +3825,14 @@ function Indun_panel_frame_contents(configbtn)
     if g.indun_panel_settings.etc.skin_name and g.indun_panel_settings.etc.skin_name == "bg" then
         prefix = "FF"
     end
-    local x = 150
+    local panel_w = math.max(IP_PANEL_W, g.indun_panel_bar_w or 0) -- バーが行より広い場合は切れないように合わせる
+    local x = ip_s(150)
     local current_set = g.indun_panel_settings.etc.use_set
     local use_tbl = g.indun_panel_settings[current_set]
     if not use_tbl then
         return 1
     end
-    local y = 40
+    local y = IP_ROW_TOP
     local index = 1
     local index_remainder = 0
     local lasy_y = 0
@@ -3737,7 +3840,8 @@ function Indun_panel_frame_contents(configbtn)
         local key, value = next(entry)
         if use_tbl[key] == 1 then
             if g.indun_panel_settings.etc.shading == 1 then
-                local line = indun_panel:CreateOrGetControl("picture", "line" .. key, 5, y - 2, 740, 33)
+                local line = indun_panel:CreateOrGetControl("picture", "line" .. key, ip_s(5), y - 2, panel_w - ip_s(10),
+                    IP_ROW_H)
                 AUTO_CAST(line)
                 line:SetImage("fullwhite")
                 line:SetEnableStretch(1)
@@ -3746,7 +3850,8 @@ function Indun_panel_frame_contents(configbtn)
                 line:SetColorTone(prefix .. tone)
             end
             if key == "jsr" or value.icon then
-                local img_icon = indun_panel:CreateOrGetControl("picture", "img_icon" .. key, x - 140, y + 5, 20, 20)
+                local img_icon = indun_panel:CreateOrGetControl("picture", "img_icon" .. key, x - ip_s(140), y + ip_s(5),
+                    ip_s(20), ip_s(20))
                 AUTO_CAST(img_icon)
                 local icon_cls = nil
                 if key == "jsr" then
@@ -3761,19 +3866,19 @@ function Indun_panel_frame_contents(configbtn)
                     img_icon:SetEnableStretch(1)
                     img_icon:EnableHitTest(0)
                 end
-                local text = indun_panel:CreateOrGetControl("richtext", key, x - 120, y + 5)
+                local text = indun_panel:CreateOrGetControl("richtext", key, x - ip_s(140) + ip_s(20) + IP_BTN_GAP, y + ip_s(5))
                 local is_jp_mode = (g.indun_panel_settings.etc.en_ver == 0 and g.lang == "Japanese")
                 local display_name = key
                 if is_jp_mode and value.jp then
                     display_name = value.jp
                 end
-                local font_tag = is_jp_mode and "{s16}" or "{s20}"
+                local font_tag = is_jp_mode and ip_f(16) or ip_f(18)
                 text:SetText(string.format("{ol}{#FFFFFF}%s%s", font_tag, display_name))
                 index = index + 1
                 if key == "challenge" then
                     local tooltip = g.lang == "Japanese" and
-                                        "{ol}左クリック: チャレンジマップの1週間分のスケジュール表示" or
-                                        "{ol}Left Click: Display the schedule for one week of the Challenge Map"
+                                        IP_TIP_OL .. "左クリック: チャレンジマップの1週間分のスケジュール表示" or
+                                        IP_TIP_OL .. "Left Click: Display the schedule for one week of the Challenge Map"
                     img_icon:EnableHitTest(1)
                     img_icon:SetEventScript(ui.LBUTTONUP, "Indun_panel_challenge_map_context")
                     img_icon:SetTextTooltip(tooltip)
@@ -3781,7 +3886,7 @@ function Indun_panel_frame_contents(configbtn)
                     text:SetEventScript(ui.LBUTTONUP, "Indun_panel_challenge_map_context")
                     text:SetTextTooltip(tooltip)
                 end
-                text:AdjustFontSizeByWidth(120)
+                text:AdjustFontSizeByWidth(ip_s(120) - ip_s(20) - IP_BTN_GAP * 2)
             end
             if type(value) == "table" then
                 if key == "challenge" then
@@ -3822,19 +3927,19 @@ function Indun_panel_frame_contents(configbtn)
                     Indun_panel_jsr_frame(indun_panel, y, x)
                 end
             end
-            y = y + 33
+            y = y + IP_ROW_H
         end
         index_remainder = index % 2
         lasy_y = y
     end
-    local y = lasy_y or 40
+    local y = lasy_y or IP_ROW_TOP
     local status, err = pcall(Indun_panel_create_currency_display, indun_panel, y)
     if not status then
         print("[IndunPanel] Currency Display Error: " .. tostring(err))
     end
-    y = y + 40
+    y = y + ip_s(40)
     if g.indun_panel_settings.etc.shading == 1 then
-        local line = indun_panel:CreateOrGetControl("picture", "last_line", 5, y - 2, 740, 33)
+        local line = indun_panel:CreateOrGetControl("picture", "last_line", ip_s(5), y - 2, panel_w - ip_s(10), IP_ROW_H)
         AUTO_CAST(line)
         line:SetImage("fullwhite")
         line:SetEnableStretch(1)
@@ -3842,47 +3947,47 @@ function Indun_panel_frame_contents(configbtn)
         line:SetColorTone(prefix .. (index_remainder == 1 and "696969" or "A9A9A9"))
     end
     indun_panel:SetLayerLevel(80)
-    indun_panel:Resize(x + 600, y)
-    indun_panel:SetSkinName(g.indun_panel_settings.etc.skin_name or "chat_window_2")
+    indun_panel:Resize(panel_w, y)
+    indun_panel:SetSkinName(g.indun_panel_settings.etc.skin_name or IP_SKIN_DEFAULT)
     indun_panel:EnableHitTest(1)
-    indun_panel:SetAlpha(100)
+    indun_panel:SetAlpha(IP_ALPHA)
     return 1
 end
 
 function Indun_panel_create_currency_display(indun_panel, y)
     local account_obj = GetMyAccountObj()
-    local bonusTP_pic = indun_panel:CreateOrGetControl("richtext", "bonusTP_pic", 320, y + 5)
+    local bonusTP_pic = indun_panel:CreateOrGetControl("richtext", "bonusTP_pic", ip_s(320), y + ip_s(5))
     AUTO_CAST(bonusTP_pic)
-    bonusTP_pic:SetText("{img bonusTP_pic 22 22}")
-    local bonusTP_count = indun_panel:CreateOrGetControl("richtext", "bonusTP_count", 350, y + 5)
+    bonusTP_pic:SetText(string.format("{img bonusTP_pic %d %d}", ip_s(22), ip_s(22)))
+    local bonusTP_count = indun_panel:CreateOrGetControl("richtext", "bonusTP_count", ip_s(350), y + ip_s(5))
     AUTO_CAST(bonusTP_count)
-    bonusTP_count:SetText("{ol}{#FFD900}{s18}" .. account_obj.Medal)
-    bonusTP_count:SetTextTooltip("{ol}Free TP")
-    local housing_btn = indun_panel:CreateOrGetControl("richtext", "housing_btn", 370, y + 5)
+    bonusTP_count:SetText("{ol}{#FFD900}" .. ip_f(18) .. account_obj.Medal)
+    bonusTP_count:SetTextTooltip(IP_TIP_OL .. "Free TP")
+    local housing_btn = indun_panel:CreateOrGetControl("richtext", "housing_btn", ip_s(370), y + ip_s(5))
     AUTO_CAST(housing_btn)
-    housing_btn:SetText("{img btn_housing_editmode_small_resize 23 23}")
-    local housing_count = indun_panel:CreateOrGetControl("richtext", "housing_count", 400, y + 5)
+    housing_btn:SetText(string.format("{img btn_housing_editmode_small_resize %d %d}", ip_s(23), ip_s(23)))
+    local housing_count = indun_panel:CreateOrGetControl("richtext", "housing_count", ip_s(400), y + ip_s(5))
     AUTO_CAST(housing_count)
     -- housing_count:SetText("{ol}{#FFD900}{s18}...")
-    housing_count:SetTextTooltip("{ol}Housing Point")
+    housing_count:SetTextTooltip(IP_TIP_OL .. "Housing Point")
     local current_time = imcTime.GetAppTime()
     if not g.indun_panel_housing_call_time or (current_time - g.indun_panel_housing_call_time) > 5 then
         g.indun_panel_housing_call_time = current_time
         Indun_panel_get_my_housing_point_callback_ready()
     elseif g.indun_panel_housing_point then
-        housing_count:SetText("{ol}{#FFD900}{s18}" .. g.indun_panel_housing_point)
+        housing_count:SetText("{ol}{#FFD900}" .. ip_f(18) .. g.indun_panel_housing_point)
     end
-    local tos_coin = indun_panel:CreateOrGetControl("richtext", "tos_coin", 450, y + 5)
-    tos_coin:SetText("{img icon_item_Tos_Event_Coin 21 21}")
-    local tos_coin_count = indun_panel:CreateOrGetControl("richtext", "tos_coin_count", 475, y + 5)
+    local tos_coin = indun_panel:CreateOrGetControl("richtext", "tos_coin", ip_s(450), y + ip_s(5))
+    tos_coin:SetText(string.format("{img icon_item_Tos_Event_Coin %d %d}", ip_s(21), ip_s(21)))
+    local tos_coin_count = indun_panel:CreateOrGetControl("richtext", "tos_coin_count", ip_s(475), y + ip_s(5))
     local coin_count = GET_COMMAED_STRING(TryGetProp(account_obj, "EVENT_TOS_WHOLE_TOTAL_COIN", "0"))
     local target_coin = GET_COMMAED_STRING(g.indun_panel_settings.etc.toscoin or 0)
-    tos_coin_count:SetText(string.format("{ol}{#FFD900}{s18}%s/{#FFD900}%s", coin_count, target_coin))
-    local pvpmine = indun_panel:CreateOrGetControl("richtext", "pvpmine", 605, y + 5)
-    pvpmine:SetText("{img pvpmine_shop_btn_total 25 25}")
-    local pvpminecount = indun_panel:CreateOrGetControl("richtext", "pvpminecount", 630, y + 5)
+    tos_coin_count:SetText(string.format("{ol}{#FFD900}%s%s/{#FFD900}%s", ip_f(18), coin_count, target_coin))
+    local pvpmine = indun_panel:CreateOrGetControl("richtext", "pvpmine", ip_s(605), y + ip_s(5))
+    pvpmine:SetText(string.format("{img pvpmine_shop_btn_total %d %d}", ip_s(25), ip_s(25)))
+    local pvpminecount = indun_panel:CreateOrGetControl("richtext", "pvpminecount", ip_s(630), y + ip_s(5))
     local mine_count = GET_COMMAED_STRING(TryGetProp(account_obj, "MISC_PVP_MINE2", "0"))
-    pvpminecount:SetText(string.format("{ol}{#FFD900}{s18}%s", mine_count))
+    pvpminecount:SetText(string.format("{ol}{#FFD900}%s%s", ip_f(18), mine_count))
 end
 
 function Indun_panel_get_my_housing_point_callback_ready()
@@ -3910,7 +4015,7 @@ function Indun_panel_get_my_housing_point_callback(code, ret_json)
     if indun_panel and indun_panel:IsVisible() == 1 then
         local housing_count = GET_CHILD_RECURSIVELY(indun_panel, "housing_count")
         if housing_count then
-            housing_count:SetText("{ol}{#FFD900}{s18}" .. housing_point)
+            housing_count:SetText("{ol}{#FFD900}" .. ip_f(18) .. housing_point)
         end
     end
 end
@@ -3952,9 +4057,9 @@ function Indun_panel_get_entrance_count(indun_type, index)
     local current_count = GET_CURRENT_ENTERANCE_COUNT(reset_type) or 0
     local max_count = GET_INDUN_MAX_ENTERANCE_COUNT(reset_type) or 0
     if index == 1 then
-        return string.format("{ol}{#FFFFFF}{s16}(%s)", current_count)
+        return string.format("{ol}{#FFFFFF}%s(%s)", ip_f(16), current_count)
     elseif index == 2 then
-        return string.format("{ol}{#FFFFFF}{s16}(%s/%s)", current_count, max_count)
+        return string.format("{ol}{#FFFFFF}%s(%s/%s)", ip_f(16), current_count, max_count)
     elseif index == 3 then
         local count = 1
         local class_name = TryGetProp(indun_cls, 'ClassName', 'None')
@@ -3968,7 +4073,7 @@ function Indun_panel_get_entrance_count(indun_type, index)
                 end
             end
         end
-        return string.format("{ol}{#FFFFFF}{s16}(%s/%s)", count, max_count)
+        return string.format("{ol}{#FFFFFF}%s(%s/%s)", ip_f(16), count, max_count)
     elseif index == 4 then
         if indun_type == 1001 then
             return current_count
@@ -4066,66 +4171,69 @@ local CHALLENGE_CONFIG = {
 }
 function Indun_panel_challenge_frame(indun_panel, key, sub_key, indun_type, y, x)
     local low_indun_type = 1001
-    local btn_low = indun_panel:CreateOrGetControl('button', "btn_low", x + 0, y, 50, 30)
+    local btn_low = indun_panel:CreateOrGetControl('button', "btn_low", x + 0, y, ip_s(50), ip_s(30))
     AUTO_CAST(btn_low)
-    btn_low:SetText("{ol}520")
+    btn_low:SetText("{ol}" .. ip_f(16) .. "520")
     btn_low:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_challenge")
     btn_low:SetEventScriptArgString(ui.LBUTTONUP, "1")
     btn_low:SetEventScriptArgNumber(ui.LBUTTONUP, low_indun_type)
-    local txt_low = indun_panel:CreateOrGetControl("richtext", "txt_low", x + 50, y + 5, 40, 30)
+    local txt_low = indun_panel:CreateOrGetControl("richtext", "txt_low", x + ip_s(50), y + ip_s(5), ip_s(40), ip_s(30))
     txt_low:SetText(Indun_panel_get_entrance_count(low_indun_type, 2))
-    local buyuse_low = indun_panel:CreateOrGetControl('button', "buyuse_low", x + 90, y, 100, 30)
+    local buyuse_low = indun_panel:CreateOrGetControl('button', "buyuse_low", x + ip_s(90), y, ip_s(100), ip_s(30))
     AUTO_CAST(buyuse_low)
-    local text_low = string.format("{ol}{#EE7800}USEor{s16}{img %s 15 15}{#FFFFFF}%s", "icon_item_Tos_Event_Coin",
-        Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_315") or 0)
+    local text_low = string.format("{ol}%s{#EE7800}USEor{img %s %d %d}{#FFFFFF}%s", ip_f(16), "icon_item_Tos_Event_Coin",
+        ip_s(15), ip_s(15), Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_315") or 0)
     local count = Indun_panel_get_invitem_count(CHALLENGE_CONFIG.LOW.expiring)
     count = count + Indun_panel_get_invitem_count(CHALLENGE_CONFIG.LOW.non_expiring)
     local icon_text = ""
     local item_cls = GetClassByType('Item', CHALLENGE_CONFIG.LOW.expiring[1])
     if item_cls then
-        local fmt = g.lang == "Japanese" and "{ol}{img %s 25 25 } %d枚持っています{nl} {nl}" or
-                        "{ol}{img %s 25 25 } Quantity in Inventory: %d{nl} {nl}"
+        local fmt = g.lang == "Japanese" and IP_TIP_OL .. "{img %s 25 25 } %d枚持っています{nl} {nl}" or
+                        IP_TIP_OL .. "{img %s 25 25 } Quantity in Inventory: %d{nl} {nl}"
         icon_text = string.format(fmt, item_cls.Icon, count)
     end
     local tooltip_low = g.lang == "Japanese" and
-                            "{ol}優先順位{nl}1.期限付き{nl}2.期限なし{nl}3.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います)" or
-                            "{ol}Priority{nl}1.Expiring{nl}2.Non-expiring{nl}3.{img icon_item_Tos_Event_Coin 20 20}tickets(buy and use)"
+                            IP_TIP_OL .. "優先順位{nl}1.期限付き{nl}2.期限なし{nl}3.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います)" or
+                            IP_TIP_OL .. "Priority{nl}1.Expiring{nl}2.Non-expiring{nl}3.{img icon_item_Tos_Event_Coin 20 20}tickets(buy and use)"
     buyuse_low:SetTextTooltip(icon_text .. tooltip_low)
     buyuse_low:SetText(text_low)
     buyuse_low:SetEventScript(ui.LBUTTONUP, "Indun_panel_challenge_item_use")
     buyuse_low:SetEventScriptArgNumber(ui.LBUTTONUP, low_indun_type)
     local high_indun_type = 1004
     local high_pt_indun_type = 1005
-    local btn_high = indun_panel:CreateOrGetControl('button', "btn_high", x + 195, y, 50, 30)
+    local btn_high = indun_panel:CreateOrGetControl('button', "btn_high", x + ip_s(195), y, ip_s(50), ip_s(30))
     AUTO_CAST(btn_high)
-    btn_high:SetText("{ol}540")
+    btn_high:SetText("{ol}" .. ip_f(16) .. "540")
     btn_high:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_challenge")
     btn_high:SetEventScriptArgString(ui.LBUTTONUP, "1")
     btn_high:SetEventScriptArgNumber(ui.LBUTTONUP, high_indun_type)
-    local btn_high_pt = indun_panel:CreateOrGetControl('button', "btn_high_pt", x + 250, y, 50, 30)
+    local btn_high_pt = indun_panel:CreateOrGetControl('button', "btn_high_pt", x + ip_s(250), y, ip_s(50), ip_s(30))
     AUTO_CAST(btn_high_pt)
-    btn_high_pt:SetText("{ol}{#FFD900}PT")
+    btn_high_pt:SetText("{ol}{#FFD900}" .. ip_f(16) .. "PT")
     btn_high_pt:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_challenge")
     btn_high_pt:SetEventScriptArgString(ui.LBUTTONUP, "2")
     btn_high_pt:SetEventScriptArgNumber(ui.LBUTTONUP, high_pt_indun_type)
-    local txt_high = indun_panel:CreateOrGetControl("richtext", "txt_high", x + 300, y + 5, 40, 30)
+    local txt_high = indun_panel:CreateOrGetControl("richtext", "txt_high", x + ip_s(300), y + ip_s(5), ip_s(40),
+        ip_s(30))
     txt_high:SetText(Indun_panel_get_entrance_count(high_indun_type, 3))
-    local buyuse_high_tos = indun_panel:CreateOrGetControl('button', "buyuse_high_tos", x + 340, y, 100, 30)
+    local buyuse_high_tos = indun_panel:CreateOrGetControl('button', "buyuse_high_tos", x + ip_s(340), y, ip_s(100),
+        ip_s(30))
     AUTO_CAST(buyuse_high_tos)
     local count = Indun_panel_get_invitem_count(CHALLENGE_CONFIG.HIGH.expiring)
     count = count + Indun_panel_get_invitem_count(CHALLENGE_CONFIG.HIGH.non_expiring)
     local icon_text_high = ""
     local item_cls = GetClassByType('Item', CHALLENGE_CONFIG.HIGH.expiring[1])
     if item_cls then
-        local fmt = g.lang == "Japanese" and "{ol}{img %s 25 25 } %d枚持っています{nl} {nl}" or
-                        "{ol}{img %s 25 25 } Quantity in Inventory: %d{nl} {nl}"
+        local fmt = g.lang == "Japanese" and IP_TIP_OL .. "{img %s 25 25 } %d枚持っています{nl} {nl}" or
+                        IP_TIP_OL .. "{img %s 25 25 } Quantity in Inventory: %d{nl} {nl}"
         icon_text_high = string.format(fmt, item_cls.Icon, count)
     end
-    local text_high_tos = string.format("{ol}{#EE7800}USEor{s16}{img %s 15 15}{#FFFFFF}%s", "icon_item_Tos_Event_Coin",
+    local text_high_tos = string.format("{ol}%s{#EE7800}USEor{img %s %d %d}{#FFFFFF}%s",
+        ip_f(16), "icon_item_Tos_Event_Coin", ip_s(15), ip_s(15),
         Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_320") or 0)
     local tooltip_high_tos = g.lang == "Japanese" and
-                                 "{ol}左クリック: PT入場{nl}右クリック: ソロ入場{nl}優先順位{nl}1.期限付き{nl}2.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います){nl}3.期限なし" or
-                                 "{ol}Left Click: PT Entry{nl}Right Click: Solo Entry{nl}Priority{nl}1.Expiring{nl}2.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}3.Non-expiring"
+                                 IP_TIP_OL .. "左クリック: PT入場{nl}右クリック: ソロ入場{nl}優先順位{nl}1.期限付き{nl}2.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います){nl}3.期限なし" or
+                                 IP_TIP_OL .. "Left Click: PT Entry{nl}Right Click: Solo Entry{nl}Priority{nl}1.Expiring{nl}2.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}3.Non-expiring"
     buyuse_high_tos:SetText(text_high_tos)
     buyuse_high_tos:SetTextTooltip(icon_text_high .. tooltip_high_tos)
     buyuse_high_tos:SetEventScript(ui.LBUTTONUP, "Indun_panel_challenge_item_use")
@@ -4134,13 +4242,14 @@ function Indun_panel_challenge_frame(indun_panel, key, sub_key, indun_type, y, x
     buyuse_high_tos:SetEventScript(ui.RBUTTONUP, "Indun_panel_challenge_item_use")
     buyuse_high_tos:SetEventScriptArgString(ui.RBUTTONUP, "tos")
     buyuse_high_tos:SetEventScriptArgNumber(ui.RBUTTONUP, high_indun_type)
-    local buyuse_high_pvp = indun_panel:CreateOrGetControl('button', "buyuse_high_pvp", x + 450, y, 100, 30)
+    local buyuse_high_pvp = indun_panel:CreateOrGetControl('button', "buyuse_high_pvp", x + ip_s(450), y, ip_s(100),
+        ip_s(30))
     AUTO_CAST(buyuse_high_pvp)
-    local text_high_pvp = string.format("{ol}{#FFFFFF}USEor{s16}{img pvpmine_shop_btn_total 18 18}{#FFFFFF}%s",
-        Indun_panel_get_recipe_trade_count("PVP_MINE_40") or 0)
+    local text_high_pvp = string.format("{ol}%s{#FFFFFF}USEor{img pvpmine_shop_btn_total %d %d}{#FFFFFF}%s", ip_f(16),
+        ip_s(18), ip_s(18), Indun_panel_get_recipe_trade_count("PVP_MINE_40") or 0)
     local tooltip_high_pvp = g.lang == "Japanese" and
-                                 "{ol}左クリック: PT入場{nl}右クリック: ソロ入場{nl}優先順位{nl}1.期限付き{nl}2.{img pvpmine_shop_btn_total 20 20}チケット(買って使います){nl}3.期限なし" or
-                                 "{ol}Left Click: PT Entry{nl}Right Click: Solo Entry{nl}Priority{nl}1.Expiring{nl}2.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}3.Non-expiring"
+                                 IP_TIP_OL .. "左クリック: PT入場{nl}右クリック: ソロ入場{nl}優先順位{nl}1.期限付き{nl}2.{img pvpmine_shop_btn_total 20 20}チケット(買って使います){nl}3.期限なし" or
+                                 IP_TIP_OL .. "Left Click: PT Entry{nl}Right Click: Solo Entry{nl}Priority{nl}1.Expiring{nl}2.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}3.Non-expiring"
     buyuse_high_pvp:SetText(text_high_pvp)
     buyuse_high_pvp:SetTextTooltip(icon_text_high .. tooltip_high_pvp)
     buyuse_high_pvp:SetEventScript(ui.LBUTTONUP, "Indun_panel_challenge_item_use")
@@ -4270,82 +4379,89 @@ local SINGULARITY_CONFIG = {
 }
 function Indun_panel_singularity_frame(indun_panel, key, sub_key, indun_type, y, x)
     local low_indun_type = 2000
-    local btn_low = indun_panel:CreateOrGetControl('button', "btn_low" .. indun_type, x, y, 50, 30)
+    local btn_low = indun_panel:CreateOrGetControl('button', "btn_low" .. indun_type, x, y, ip_s(50), ip_s(30))
     AUTO_CAST(btn_low)
-    btn_low:SetText("{ol}520")
+    btn_low:SetText("{ol}" .. ip_f(16) .. "520")
     btn_low:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_singularity")
     btn_low:SetEventScriptArgNumber(ui.LBUTTONUP, low_indun_type)
-    local count_low = indun_panel:CreateOrGetControl("richtext", "count_low" .. indun_type, x + 55, y + 5, 30, 30)
-    count_low:SetText("{ol}(" .. Indun_panel_get_entrance_count(low_indun_type, 4) .. ")")
-    local ticket_low = indun_panel:CreateOrGetControl('button', 'ticket_low' .. indun_type, x + 85, y, 100, 30)
+    local count_low = indun_panel:CreateOrGetControl("richtext", "count_low" .. indun_type, x + ip_s(55), y + ip_s(5),
+        ip_s(30), ip_s(30))
+    count_low:SetText("{ol}" .. ip_f(16) .. "(" .. Indun_panel_get_entrance_count(low_indun_type, 4) .. ")")
+    local ticket_low = indun_panel:CreateOrGetControl('button', 'ticket_low' .. indun_type, x + ip_s(85), y, ip_s(100),
+        ip_s(30))
     AUTO_CAST(ticket_low)
-    local text_low = string.format("{ol}{#EE7800}USEor{s16}{img %s 15 15}{#FFFFFF}%s", "icon_item_Tos_Event_Coin",
-        Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_314") or 0)
+    local text_low = string.format("{ol}%s{#EE7800}USEor{img %s %d %d}{#FFFFFF}%s", ip_f(16), "icon_item_Tos_Event_Coin",
+        ip_s(15), ip_s(15), Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_314") or 0)
     local count = Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2000].expiring)
     count = count + Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2000].non_expiring)
     local icon_text = ""
     local item_cls = GetClassByType('Item', SINGULARITY_CONFIG[2000].expiring[1])
     if item_cls then
-        local fmt = g.lang == "Japanese" and "{ol}{img %s 25 25 } %d枚持っています{nl} {nl}" or
-                        "{ol}{img %s 25 25 } Quantity in Inventory: %d{nl} {nl}"
+        local fmt = g.lang == "Japanese" and IP_TIP_OL .. "{img %s 25 25 } %d枚持っています{nl} {nl}" or
+                        IP_TIP_OL .. "{img %s 25 25 } Quantity in Inventory: %d{nl} {nl}"
         icon_text = string.format(fmt, item_cls.Icon, count)
     end
     local tooltip_low = g.lang == "Japanese" and
-                            "{ol}優先順位{nl}1.期限付き{nl}2.期限なし{nl}3.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います)" or
-                            "{ol}Priority{nl}1.Expiring{nl}2.Non-expiring{nl}3.{img icon_item_Tos_Event_Coin 20 20}tickets(buy and use)"
+                            IP_TIP_OL .. "優先順位{nl}1.期限付き{nl}2.期限なし{nl}3.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います)" or
+                            IP_TIP_OL .. "Priority{nl}1.Expiring{nl}2.Non-expiring{nl}3.{img icon_item_Tos_Event_Coin 20 20}tickets(buy and use)"
     ticket_low:SetText(text_low)
     ticket_low:SetTextTooltip(icon_text .. tooltip_low)
     ticket_low:SetEventScript(ui.LBUTTONUP, "Indun_panel_item_use_sin")
     ticket_low:SetEventScriptArgNumber(ui.LBUTTONUP, low_indun_type)
     local high_indun_type = 2001
-    local btn_high = indun_panel:CreateOrGetControl('button', "btn_high" .. indun_type, x + 195, y, 50, 30)
+    local btn_high = indun_panel:CreateOrGetControl('button', "btn_high" .. indun_type, x + ip_s(195), y, ip_s(50),
+        ip_s(30))
     AUTO_CAST(btn_high)
-    btn_high:SetText("{ol}540")
+    btn_high:SetText("{ol}" .. ip_f(16) .. "540")
     btn_high:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_singularity")
     btn_high:SetEventScriptArgNumber(ui.LBUTTONUP, high_indun_type)
-    local count_high = indun_panel:CreateOrGetControl("richtext", "count_high" .. indun_type, x + 250, y + 5, 30, 30)
-    count_high:SetText("{ol}(" .. Indun_panel_get_entrance_count(high_indun_type, 4) .. ")")
-    local ticket_high_tos = indun_panel:CreateOrGetControl('button', 'ticket_high_tos' .. indun_type, x + 280, y, 100,
-        30)
+    local count_high = indun_panel:CreateOrGetControl("richtext", "count_high" .. indun_type, x + ip_s(250),
+        y + ip_s(5), ip_s(30), ip_s(30))
+    count_high:SetText("{ol}" .. ip_f(16) .. "(" .. Indun_panel_get_entrance_count(high_indun_type, 4) .. ")")
+    local ticket_high_tos = indun_panel:CreateOrGetControl('button', 'ticket_high_tos' .. indun_type, x + ip_s(280), y,
+        ip_s(100), ip_s(30))
     AUTO_CAST(ticket_high_tos)
-    local text_high_tos = string.format("{ol}{#EE7800}USEor{s16}{img %s 15 15}{#FFFFFF}%s", "icon_item_Tos_Event_Coin",
+    local text_high_tos = string.format("{ol}%s{#EE7800}USEor{img %s %d %d}{#FFFFFF}%s",
+        ip_f(16), "icon_item_Tos_Event_Coin", ip_s(15), ip_s(15),
         Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_319") or 0)
     local count = Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2001].expiring)
     count = count + Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2001].non_expiring)
     local icon_text_high = ""
     local item_cls = GetClassByType('Item', SINGULARITY_CONFIG[2001].expiring[1])
     if item_cls then
-        local fmt = g.lang == "Japanese" and "{ol}{img %s 25 25 } %d枚持っています{nl} {nl}" or
-                        "{ol}{img %s 25 25 } Quantity in Inventory: %d{nl} {nl}"
+        local fmt = g.lang == "Japanese" and IP_TIP_OL .. "{img %s 25 25 } %d枚持っています{nl} {nl}" or
+                        IP_TIP_OL .. "{img %s 25 25 } Quantity in Inventory: %d{nl} {nl}"
         icon_text_high = string.format(fmt, item_cls.Icon, count)
     end
     local tooltip_high_tos = g.lang == "Japanese" and
-                                 "{ol}優先順位{nl}1.24時間以内の期限付きチケット{nl}2.期限付きチケット{nl}3.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います){nl}4.期限の無いチケット" or
-                                 "{ol}Priority{nl}1.Limited-time tickets (under 24 hours){nl}2.Limited-time tickets{nl}3.{img icon_item_Tos_Event_Coin 20 20}tickets(buy and use){nl}4.Tickets without an expiration date"
+                                 IP_TIP_OL .. "優先順位{nl}1.24時間以内の期限付きチケット{nl}2.期限付きチケット{nl}3.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います){nl}4.期限の無いチケット" or
+                                 IP_TIP_OL .. "Priority{nl}1.Limited-time tickets (under 24 hours){nl}2.Limited-time tickets{nl}3.{img icon_item_Tos_Event_Coin 20 20}tickets(buy and use){nl}4.Tickets without an expiration date"
     ticket_high_tos:SetText(text_high_tos)
     ticket_high_tos:SetTextTooltip(icon_text_high .. tooltip_high_tos)
     ticket_high_tos:SetEventScript(ui.LBUTTONUP, "Indun_panel_item_use_sin")
     ticket_high_tos:SetEventScriptArgString(ui.LBUTTONUP, "tos")
     ticket_high_tos:SetEventScriptArgNumber(ui.LBUTTONUP, high_indun_type)
-    local ticket_high_pvp = indun_panel:CreateOrGetControl('button', 'ticket_high_pvp' .. indun_type, x + 390, y, 140,
-        30)
+    local ticket_high_pvp = indun_panel:CreateOrGetControl('button', 'ticket_high_pvp' .. indun_type, x + ip_s(390), y,
+        ip_s(140), ip_s(30))
     AUTO_CAST(ticket_high_pvp)
-    local text_high_pvp = string.format("{ol}{#FFFFFF}{s16}USEor{img %s 18 18}d:%s w:%s", "pvpmine_shop_btn_total",
-        Indun_panel_get_recipe_trade_count("PVP_MINE_41") or 0, Indun_panel_get_recipe_trade_count("PVP_MINE_42") or 0)
+    local text_high_pvp = string.format("{ol}{#FFFFFF}%sUSEor{img %s %d %d}d:%s w:%s", ip_f(16), "pvpmine_shop_btn_total",
+        ip_s(18), ip_s(18), Indun_panel_get_recipe_trade_count("PVP_MINE_41") or 0,
+        Indun_panel_get_recipe_trade_count("PVP_MINE_42") or 0)
     local tooltip_high_pvp = g.lang == "Japanese" and
-                                 "{ol}優先順位{nl}1.24時間以内の期限付きチケット{nl}2.期限付きチケット{nl}3.{img pvpmine_shop_btn_total 20 20}チケット(買って使います){nl}4.期限の無いチケット" or
-                                 "{ol}Priority{nl}1.Limited-time tickets (under 24 hours){nl}2.Limited-time tickets{nl}3.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}4.Tickets without an expiration date"
+                                 IP_TIP_OL .. "優先順位{nl}1.24時間以内の期限付きチケット{nl}2.期限付きチケット{nl}3.{img pvpmine_shop_btn_total 20 20}チケット(買って使います){nl}4.期限の無いチケット" or
+                                 IP_TIP_OL .. "Priority{nl}1.Limited-time tickets (under 24 hours){nl}2.Limited-time tickets{nl}3.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}4.Tickets without an expiration date"
     ticket_high_pvp:SetText(text_high_pvp)
     ticket_high_pvp:SetTextTooltip(icon_text_high .. tooltip_high_pvp)
     ticket_high_pvp:SetEventScript(ui.LBUTTONUP, "Indun_panel_item_use_sin")
     ticket_high_pvp:SetEventScriptArgString(ui.LBUTTONUP, "pvp")
     ticket_high_pvp:SetEventScriptArgNumber(ui.LBUTTONUP, high_indun_type)
-    local singularity_check = indun_panel:CreateOrGetControl("checkbox", "singularity_check", x + 545, y, 25, 25)
+    local singularity_check = indun_panel:CreateOrGetControl("checkbox", "singularity_check", x + ip_s(545), y,
+        ip_s(25), ip_s(25))
     AUTO_CAST(singularity_check)
     singularity_check:SetEventScript(ui.LBUTTONUP, "Indun_panel_ischecked")
     singularity_check:SetTextTooltip(g.lang == "Japanese" and
-                                         "{ol}チェックをすると自動マッチングボタンを押しません" or
-                                         "{ol}If checked, the automatic matching button will not be pressed")
+                                         IP_TIP_OL .. "チェックをすると自動マッチングボタンを押しません" or
+                                         IP_TIP_OL .. "If checked, the automatic matching button will not be pressed")
     singularity_check:SetCheck(g.indun_panel_settings.etc.singularity_check)
 end
 
@@ -4470,30 +4586,33 @@ local buff_ids = {
 
 function Indun_panel_create_frame_onsweep(indun_panel, key, sub_key, sub_value, y, x)
     if raid_tbl[sub_value] then
-        local use_btn = indun_panel:CreateOrGetControl('button', key .. "use", x + 470, y, 80, 30)
+        local use_btn = indun_panel:CreateOrGetControl('button', key .. "use", x + ip_s(470), y, ip_s(80), ip_s(30))
         AUTO_CAST(use_btn)
-        use_btn:SetText("{ol}{#EE7800}USE")
+        use_btn:SetText("{ol}{#EE7800}" .. ip_f(16) .. "USE")
         local count = Indun_panel_get_invitem_count(raid_tbl[sub_value])
         local item_cls = GetClassByType('Item', raid_tbl[sub_value][2])
         if item_cls then
-            local fmt = g.lang == "Japanese" and "{ol}{img %s 25 25 } %d枚持っています" or
-                            "{ol}{img %s 25 25 } Quantity in Inventory: %d"
+            local fmt = g.lang == "Japanese" and IP_TIP_OL .. "{img %s 25 25 } %d枚持っています" or
+                            IP_TIP_OL .. "{img %s 25 25 } Quantity in Inventory: %d"
             use_btn:SetTextTooltip(string.format(fmt, item_cls.Icon, count))
         end
         use_btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_raid_itemuse")
         use_btn:SetEventScriptArgNumber(ui.LBUTTONUP, sub_value)
     end
-    local btn_solo = indun_panel:CreateOrGetControl('button', key .. "solo", x, y, 80, 30)
-    local btn_auto = indun_panel:CreateOrGetControl('button', key .. "auto", x + 85, y, 80, 30)
-    local btn_hard = indun_panel:CreateOrGetControl('button', key .. "hard", x + 215, y, 80, 30)
-    local btn_sweep = indun_panel:CreateOrGetControl('button', key .. "sweep", x + 350, y, 80, 30)
-    local txt_count = indun_panel:CreateOrGetControl("richtext", key .. "count", x + 170, y + 5, 50, 30)
-    local txt_hard_count = indun_panel:CreateOrGetControl("richtext", key .. "counthard", x + 300, y + 5, 50, 30)
-    local txt_sweep_count = indun_panel:CreateOrGetControl("richtext", key .. "sweepcount", x + 435, y + 5, 50, 30)
-    btn_solo:SetText("{ol}SOLO")
-    btn_auto:SetText("{ol}{#FFD900}AUTO")
-    btn_hard:SetText("{ol}{#FF0000}HARD")
-    btn_sweep:SetText("{ol}{#00FF00}ACLEAR")
+    local btn_solo = indun_panel:CreateOrGetControl('button', key .. "solo", x, y, ip_s(80), ip_s(30))
+    local btn_auto = indun_panel:CreateOrGetControl('button', key .. "auto", x + ip_s(85), y, ip_s(80), ip_s(30))
+    local btn_hard = indun_panel:CreateOrGetControl('button', key .. "hard", x + ip_s(215), y, ip_s(80), ip_s(30))
+    local btn_sweep = indun_panel:CreateOrGetControl('button', key .. "sweep", x + ip_s(350), y, ip_s(80), ip_s(30))
+    local txt_count = indun_panel:CreateOrGetControl("richtext", key .. "count", x + ip_s(170), y + ip_s(5), ip_s(50),
+        ip_s(30))
+    local txt_hard_count = indun_panel:CreateOrGetControl("richtext", key .. "counthard", x + ip_s(300), y + ip_s(5),
+        ip_s(50), ip_s(30))
+    local txt_sweep_count = indun_panel:CreateOrGetControl("richtext", key .. "sweepcount", x + ip_s(435), y + ip_s(5),
+        ip_s(50), ip_s(30))
+    btn_solo:SetText("{ol}" .. ip_f(16) .. "SOLO")
+    btn_auto:SetText("{ol}{#FFD900}" .. ip_f(16) .. "AUTO")
+    btn_hard:SetText("{ol}{#FF0000}" .. ip_f(16) .. "HARD")
+    btn_sweep:SetText("{ol}{#00FF00}" .. ip_f(16) .. "ACLEAR")
     if sub_key == "s" then -- Solo
         txt_count:SetText(Indun_panel_get_entrance_count(sub_value, 2))
         btn_solo:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_solo")
@@ -4514,7 +4633,7 @@ function Indun_panel_create_frame_onsweep(indun_panel, key, sub_key, sub_value, 
         end
     elseif sub_key == "ac" then -- Auto Clear (Sweep) Count
         local count_str = Indun_panel_sweep_count(sub_value)
-        txt_sweep_count:SetText(string.format("{ol}{#FFFFFF}{s16}(%s)", count_str))
+        txt_sweep_count:SetText(string.format("{ol}{#FFFFFF}%s(%s)", ip_f(16), count_str))
     end
 end
 
@@ -4639,14 +4758,16 @@ function Indun_panel_enter_hard(indun_panel, ctrl, str, indun_type)
 end
 
 function Indun_panel_create_frame(indun_panel, key, sub_key, sub_value, y, x)
-    local btn_solo = indun_panel:CreateOrGetControl('button', key .. "solo", x, y, 80, 30)
-    local btn_auto = indun_panel:CreateOrGetControl('button', key .. "auto", x + 85, y, 80, 30)
-    local btn_hard = indun_panel:CreateOrGetControl('button', key .. "hard", x + 215, y, 80, 30)
-    local txt_count = indun_panel:CreateOrGetControl("richtext", key .. "count", x + 170, y + 5, 50, 30)
-    local txt_hard_count = indun_panel:CreateOrGetControl("richtext", key .. "counthard", x + 300, y + 5, 50, 30)
-    btn_solo:SetText("{ol}SOLO")
-    btn_auto:SetText(key == "memory" and "{ol}{#FFD900}NORMAL" or "{ol}{#FFD900}AUTO")
-    btn_hard:SetText("{ol}{#FF0000}HARD")
+    local btn_solo = indun_panel:CreateOrGetControl('button', key .. "solo", x, y, ip_s(80), ip_s(30))
+    local btn_auto = indun_panel:CreateOrGetControl('button', key .. "auto", x + ip_s(85), y, ip_s(80), ip_s(30))
+    local btn_hard = indun_panel:CreateOrGetControl('button', key .. "hard", x + ip_s(215), y, ip_s(80), ip_s(30))
+    local txt_count = indun_panel:CreateOrGetControl("richtext", key .. "count", x + ip_s(170), y + ip_s(5), ip_s(50),
+        ip_s(30))
+    local txt_hard_count = indun_panel:CreateOrGetControl("richtext", key .. "counthard", x + ip_s(300), y + ip_s(5),
+        ip_s(50), ip_s(30))
+    btn_solo:SetText("{ol}" .. ip_f(16) .. "SOLO")
+    btn_auto:SetText(key == "memory" and "{ol}{#FFD900}" .. ip_f(16) .. "NORMAL" or "{ol}{#FFD900}" .. ip_f(16) .. "AUTO")
+    btn_hard:SetText("{ol}{#FF0000}" .. ip_f(16) .. "HARD")
     if sub_key == "s" then
         local count_idx = (key == "memory") and 1 or 2
         txt_count:SetText(Indun_panel_get_entrance_count(sub_value, count_idx))
@@ -4677,32 +4798,36 @@ local TELHARSHA_CONFIG = {
     max_count = 3
 }
 function Indun_panel_telharsha_frame(indun_panel, key, value, y, x)
-    local btn = indun_panel:CreateOrGetControl('button', key .. 'btn', x, y, 80, 30)
+    local btn = indun_panel:CreateOrGetControl('button', key .. 'btn', x, y, ip_s(80), ip_s(30))
     AUTO_CAST(btn)
-    btn:SetText("{ol}IN")
+    btn:SetText("{ol}" .. ip_f(16) .. "IN")
     btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_solo")
     btn:SetEventScriptArgNumber(ui.LBUTTONUP, value)
-    local count = indun_panel:CreateOrGetControl("richtext", key .. "count", x + 85, y + 5, 50, 30)
+    local count = indun_panel:CreateOrGetControl("richtext", key .. "count", x + ip_s(85), y + ip_s(5), ip_s(50),
+        ip_s(30))
     count:SetText(Indun_panel_get_entrance_count(value, 2))
-    local ticket_btn = indun_panel:CreateOrGetControl('button', key .. 'ticket_btn', x + 130, y, 80, 30)
+    local ticket_btn = indun_panel:CreateOrGetControl('button', key .. 'ticket_btn', x + ip_s(130), y, ip_s(80),
+        ip_s(30))
     AUTO_CAST(ticket_btn)
     local tickets = {10820009, 11035056}
     local count = Indun_panel_get_invitem_count(tickets)
     local icon_text = ""
     local item_cls = GetClassByType('Item', tickets[1])
     if item_cls then
-        local fmt = g.lang == "Japanese" and "{ol}{img %s 25 25 } %d枚持っています" or
-                        "{ol}{img %s 25 25 } Quantity in Inventory: %d"
+        local fmt = g.lang == "Japanese" and IP_TIP_OL .. "{img %s 25 25 } %d枚持っています" or
+                        IP_TIP_OL .. "{img %s 25 25 } Quantity in Inventory: %d"
         icon_text = string.format(fmt, item_cls.Icon, count)
     end
     ticket_btn:SetTextTooltip(icon_text)
-    ticket_btn:SetText("{ol}{#EE7800}{s14}BUYUSE")
+    ticket_btn:SetText("{ol}{#EE7800}" .. ip_f(14) .. "BUYUSE")
     ticket_btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_buyuse_telharsha")
     ticket_btn:SetEventScriptArgString(ui.LBUTTONUP, TELHARSHA_CONFIG.recipe)
     ticket_btn:SetEventScriptArgNumber(ui.LBUTTONUP, value)
     local change_count = Indun_panel_get_recipe_trade_count(TELHARSHA_CONFIG.recipe)
-    local tos_shop_count = indun_panel:CreateOrGetControl("richtext", key .. "tos_shop_count", x + 215, y + 5, 40, 30)
-    tos_shop_count:SetText(string.format("{ol}{s16}({img icon_item_Tos_Event_Coin 15 15}%s)", change_count))
+    local tos_shop_count = indun_panel:CreateOrGetControl("richtext", key .. "tos_shop_count", x + ip_s(215),
+        y + ip_s(5), ip_s(40), ip_s(30))
+    tos_shop_count:SetText(string.format("{ol}%s({img icon_item_Tos_Event_Coin %d %d}%s)", ip_f(16), ip_s(15), ip_s(15),
+        change_count))
 end
 
 function Indun_panel_buyuse_telharsha(indun_panel, ctrl, recipe_name, indun_type)
@@ -4743,38 +4868,42 @@ local VELNICE_CONFIG = {
     max_count = 1
 }
 function Indun_panel_velnice_frame(indun_panel, key, value, y, x)
-    local btn = indun_panel:CreateOrGetControl('button', key .. 'btn', x, y, 80, 30)
+    local btn = indun_panel:CreateOrGetControl('button', key .. 'btn', x, y, ip_s(80), ip_s(30))
     AUTO_CAST(btn)
-    btn:SetText("{ol}IN")
+    btn:SetText("{ol}" .. ip_f(16) .. "IN")
     btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_velnice_solo")
     btn:SetEventScriptArgNumber(ui.LBUTTONUP, value)
-    local count = indun_panel:CreateOrGetControl("richtext", key .. "count", x + 85, y + 5, 50, 30)
+    local count = indun_panel:CreateOrGetControl("richtext", key .. "count", x + ip_s(85), y + ip_s(5), ip_s(50),
+        ip_s(30))
     count:SetText(Indun_panel_get_entrance_count(value, 2))
-    local ticket_btn = indun_panel:CreateOrGetControl('button', key .. 'ticket_btn', x + 130, y, 80, 30)
+    local ticket_btn = indun_panel:CreateOrGetControl('button', key .. 'ticket_btn', x + ip_s(130), y, ip_s(80),
+        ip_s(30))
     AUTO_CAST(ticket_btn)
     local count = Indun_panel_get_invitem_count(VELNICE_CONFIG.tickets)
     local icon_text = ""
     local item_cls = GetClassByType('Item', VELNICE_CONFIG.tickets[1])
     if item_cls then
-        local fmt = g.lang == "Japanese" and "{ol}{img %s 25 25 } %d枚持っています" or
-                        "{ol}{img %s 25 25 } Quantity in Inventory: %d"
+        local fmt = g.lang == "Japanese" and IP_TIP_OL .. "{img %s 25 25 } %d枚持っています" or
+                        IP_TIP_OL .. "{img %s 25 25 } Quantity in Inventory: %d"
         icon_text = string.format(fmt, item_cls.Icon, count)
     end
     ticket_btn:SetTextTooltip(icon_text)
-    ticket_btn:SetText("{ol}{#EE7800}{s14}BUYUSE")
+    ticket_btn:SetText("{ol}{#EE7800}" .. ip_f(14) .. "BUYUSE")
     ticket_btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_buyuse_vel")
     ticket_btn:SetEventScriptArgString(ui.LBUTTONUP, VELNICE_CONFIG.recipe)
     ticket_btn:SetEventScriptArgNumber(ui.LBUTTONUP, value)
     local trade_count = Indun_panel_get_recipe_trade_count(VELNICE_CONFIG.recipe)
     trade_count = math.max(0, trade_count)
     local overbuy_limit = Indun_panel_overbuy_count(VELNICE_CONFIG.recipe)
-    local change_text = indun_panel:CreateOrGetControl("richtext", key .. "change_text", x + 215, y + 5, 60, 30)
-    change_text:SetText(string.format("{ol}{#FFFFFF}(%d/%d)", trade_count, overbuy_limit))
-    local amount = indun_panel:CreateOrGetControl("richtext", key .. "amount", x + 280, y + 5, 50, 30)
+    local change_text = indun_panel:CreateOrGetControl("richtext", key .. "change_text", x + ip_s(215), y + ip_s(5),
+        ip_s(60), ip_s(30))
+    change_text:SetText(string.format("{ol}{#FFFFFF}%s(%d/%d)", ip_f(16), trade_count, overbuy_limit))
+    local amount = indun_panel:CreateOrGetControl("richtext", key .. "amount", x + ip_s(280), y + ip_s(5), ip_s(50),
+        ip_s(30))
     local cost = Indun_panel_overbuy_amount(VELNICE_CONFIG.recipe)
     local color = (trade_count > 0) and "{#FFFFFF}" or "{#FF0000}"
-    local amount_str = string.format("{ol}{#FFFFFF}({img pvpmine_shop_btn_total 20 20}%s%s{ol}{#FFFFFF})", color,
-        GET_COMMAED_STRING(cost))
+    local amount_str = string.format("{ol}{#FFFFFF}%s({img pvpmine_shop_btn_total %d %d}%s%s{ol}{#FFFFFF})", ip_f(16),
+        ip_s(20), ip_s(20), color, GET_COMMAED_STRING(cost))
     amount:SetText(amount_str)
 end
 
@@ -4844,16 +4973,18 @@ function Indun_panel_create_common_ticket_frame(indun_panel, key, indun_type, y,
     if not config then
         return
     end
-    local btn = indun_panel:CreateOrGetControl('button', key .. 'btn', x, y, 80, 30)
+    local btn = indun_panel:CreateOrGetControl('button', key .. 'btn', x, y, ip_s(80), ip_s(30))
     AUTO_CAST(btn)
-    btn:SetText("{ol}" .. config.label)
+    btn:SetText("{ol}" .. ip_f(16) .. config.label)
     btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_solo")
     btn:SetEventScriptArgNumber(ui.LBUTTONUP, indun_type)
-    local count_text = indun_panel:CreateOrGetControl("richtext", key .. "count", x + 85, y + 5, 50, 30)
+    local count_text = indun_panel:CreateOrGetControl("richtext", key .. "count", x + ip_s(85), y + ip_s(5), ip_s(50),
+        ip_s(30))
     count_text:SetText(Indun_panel_get_entrance_count(indun_type, 1))
-    local ticket_btn = indun_panel:CreateOrGetControl('button', key .. 'ticket_btn', x + 115, y, 80, 30)
+    local ticket_btn = indun_panel:CreateOrGetControl('button', key .. 'ticket_btn', x + ip_s(115), y, ip_s(80),
+        ip_s(30))
     AUTO_CAST(ticket_btn)
-    ticket_btn:SetText("{ol}{#EE7800}{s14}USE")
+    ticket_btn:SetText("{ol}{#EE7800}" .. ip_f(14) .. "USE")
     local inv_count = 0
     for _, id in ipairs(config.tickets) do
         local inv_item = session.GetInvItemByType(id)
@@ -4864,8 +4995,8 @@ function Indun_panel_create_common_ticket_frame(indun_panel, key, indun_type, y,
     if #config.tickets > 0 then
         local item_cls = GetClassByType('Item', config.tickets[1])
         if item_cls then
-            local fmt = g.lang == "Japanese" and "{ol}{img %s 25 25 } %d枚持っています" or
-                            "{ol}{img %s 25 25 } Quantity in Inventory: %d"
+            local fmt = g.lang == "Japanese" and IP_TIP_OL .. "{img %s 25 25 } %d枚持っています" or
+                            IP_TIP_OL .. "{img %s 25 25 } Quantity in Inventory: %d"
             ticket_btn:SetTextTooltip(string.format(fmt, item_cls.Icon, inv_count))
         end
     end
@@ -4896,9 +5027,9 @@ function Indun_panel_item_use(indun_panel, ctrl, str, indun_type)
 end
 
 function Indun_panel_jsr_frame(indun_panel, y, x)
-    local jsrbtn = indun_panel:CreateOrGetControl('button', 'jsrbtn', x, y, 80, 30)
+    local jsrbtn = indun_panel:CreateOrGetControl('button', 'jsrbtn', x, y, ip_s(80), ip_s(30))
     AUTO_CAST(jsrbtn)
-    jsrbtn:SetText("{ol}JSR")
+    jsrbtn:SetText("{ol}" .. ip_f(16) .. "JSR")
     jsrbtn:SetEventScript(ui.LBUTTONUP, "FIELD_BOSS_JOIN_ENTER_CLICK")
     jsrbtn:SetUserValue("BASE_X", x)
     jsrbtn:SetUserValue("BASE_Y", y)
@@ -4953,8 +5084,8 @@ function Indun_panel_field_boss_enter_timer_setting(ctrl)
     end
     local x = ctrl:GetUserIValue("BASE_X")
     local y = ctrl:GetUserIValue("BASE_Y")
-    local jsrtime = frame:CreateOrGetControl("richtext", "jsrtime", x + 85, y + 5, 10, 10)
-    jsrtime:SetText("{ol}" .. text_str)
+    local jsrtime = frame:CreateOrGetControl("richtext", "jsrtime", x + ip_s(85), y + ip_s(5), ip_s(10), ip_s(10))
+    jsrtime:SetText("{ol}" .. ip_f(16) .. text_str)
     if x == 0 then
         jsrtime:ShowWindow(0)
     else
@@ -22293,7 +22424,7 @@ function Monster_kill_count_map_information(map_id)
         local item_cls = GetClassByType("Item", item_id_num)
         if item_cls and map_data.get_items[item_id_str_key] then
             local item_get_count = map_data.get_items[item_id_str_key]
-            local item_disp_str1 = string.format("{ol}{img %s 24 24}  %s : %d %s", item_cls.Icon, item_cls.Name,
+            local item_disp_str1 = string.format("{img %s 24 24}  %s : %d %s", item_cls.Icon, item_cls.Name,
                 item_get_count, g.lang == "Japanese" and "個" or "pcs")
             local item_label1 = info_box:CreateOrGetControl("richtext", "display_text" .. item_id_str_key, 10,
                 95 + current_y, 50, 20)
