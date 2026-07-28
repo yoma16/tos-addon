@@ -43,12 +43,13 @@
 -- 1.0.5 "OCSL: fix settings frame not opening (lazy-load char data when opened outside a city)"
 -- 1.0.6 "OCSL: prune characters by the barrack roster instead of system_option pc_id (pc_id wiped valid chars on every city entry, leaving only the current char); auto-register current-layer chars"
 -- 1.0.7 "IP: scale the whole panel down to 80% (IP_SCALE) including font sizes (ip_f) and fix the frame position resetting to the default after every redraw (drag save was wired to the inverted move flag)"
+-- 1.0.8 "VE v1.1.0: the weekly-boss checkbox no longer skips the map check entirely (gear used to swap on every non-city map), all on/off toggle, translucent config window. QSO: the joystick quickslot bar no longer disappears after a potion swap -- it is never hidden anymore, and the keyboard bar is shown at alpha 0 so it does not flash"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.0.7"
+local ver = "1.0.8"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -3187,7 +3188,7 @@ function Indun_panel_frame_drag(indun_panel)
     local pos_x = indun_panel:GetX()
     local pos_y = indun_panel:GetY()
     if pos_x == g.indun_panel_settings.etc.x and pos_y == g.indun_panel_settings.etc.y then
-        return -- ドラッグしていない単純クリック
+        return -- 드래그하지 않은 단순 클릭
     end
     g.indun_panel_settings.etc.x = pos_x
     g.indun_panel_settings.etc.y = pos_y
@@ -18060,6 +18061,21 @@ end
 -- goddess_icor_manager ここまで
 
 -- vakarine_equip ここから
+-- vakarine_equip 자체 버전 (번들 전체의 ver과는 별개로 관리 / own version, separate from the bundle ver)
+-- 설정창 타이틀에 표시된다
+local VE_VER = "1.1.0"
+-- 탈착 대상 슬롯 목록. 설정 초기화 / 설정창 / 전체선택 토글에서 공유 (shared equip slot list)
+local VE_EQUIP_SLOTS = {"RH", "LH", "RH_SUB", "LH_SUB", "RING1", "RING2", "SHIRT", "PANTS", "GLOVES", "BOOTS",
+                        "SHOULDER", "BELT", "NECK"}
+-- 설정창 2단 배치 (config window is split into two columns)
+-- 왼쪽: 무기 + 방어구 / 오른쪽: 장신구류
+local VE_COL_LEFT = {"RH", "LH", "RH_SUB", "LH_SUB", "SHIRT", "PANTS", "GLOVES", "BOOTS"}
+local VE_COL_RIGHT = {"RING1", "RING2", "SHOULDER", "BELT", "NECK"}
+-- 창 외형은 cupole_manager HUD와 같은 스킨(bg2). 불투명도만 조금 높게 (frame look: same skin as cupole HUD)
+-- "bg"(indun_panel의 Solid black)는 스킨 이미지 자체에 그라데이션이 있어 안쪽 색이 달라 보이므로 쓰지 않는다
+local VE_SKIN = "bg2"
+local VE_ALPHA = 190
+
 function Vakarine_equip_save_settings()
     g.save_json(g.vakarine_equip_path, g.vakarine_equip_settings)
 end
@@ -18071,7 +18087,7 @@ function Vakarine_equip_load_settings()
         settings = {
             buffid = {},
             delay = 0.1,
-            jsr = 0,
+            jsr = 1, -- 주간 보스 레이드에서도 기본 ON (구 사양의 실질 동작에 맞춤 / default on)
             x = 0,
             y = 0,
             move = 1,
@@ -18107,12 +18123,10 @@ function vakarine_equip_on_init()
 end
 
 function Vakarine_equip_chrs_settings()
-    local equips = {"RH", "LH", "RH_SUB", "LH_SUB", "RING1", "RING2", "SHIRT", "PANTS", "GLOVES", "BOOTS", "SHOULDER",
-                    "BELT", "NECK"}
     g.vakarine_equip_settings.chars[g.cid] = {
         use = 0
     }
-    for _, equip in ipairs(equips) do
+    for _, equip in ipairs(VE_EQUIP_SLOTS) do
         g.vakarine_equip_settings.chars[g.cid][equip] = 0
     end
     Vakarine_equip_save_settings()
@@ -18211,6 +18225,21 @@ function Vakarine_equip_config_or_startup(frame, ctrl)
     end
 end
 
+-- 주간 보스 레이드(JSR = 보스 협동전) 판정. 맵 Keyword에 "WeeklyBossMap"이 있는지로 본다
+-- 클라이언트 본체도 같은 방식 (indunenter.lua:327 string.find(mapKeyword, "IsRaidField"))
+-- 맵 ID를 박아두면 IMC가 맵을 추가할 때 누락된다 (keyword check, not hardcoded IDs)
+function Vakarine_equip_is_weekly_boss_map()
+    local map_cls = GetClass("Map", session.GetMapName())
+    if not map_cls then
+        return false
+    end
+    local map_keyword = TryGetProp(map_cls, "Keyword", "None")
+    if not map_keyword or map_keyword == "None" then
+        return false
+    end
+    return string.find(map_keyword, "WeeklyBossMap") ~= nil
+end
+
 function Vakarine_equip_start_operation(is_manual)
     if not is_manual then
         local char_data = g.vakarine_equip_settings.chars[g.cid]
@@ -18225,7 +18254,16 @@ function Vakarine_equip_start_operation(is_manual)
     local is_valid_map =
         (g.get_map_type() == "Instance" and g.map_id ~= 11227) -- 11244 聖域3F 11227 分裂 8022 ヴェルニケ
         or g.map_id == 8022 or g.map_id == 11244
-    if is_valid_map or is_manual or g.vakarine_equip_settings.jsr == 1 then
+    -- 주간 보스 레이드(Keyword=WeeklyBossMap / 11201~11207, 11214)도 MapType이 "Instance"라서
+    -- 위 조건만으로는 항상 작동한다. 이 8맵만 jsr 체크박스로 명시적으로 ON/OFF 한다
+    if Vakarine_equip_is_weekly_boss_map() then
+        is_valid_map = g.vakarine_equip_settings.jsr == 1
+    end
+    if is_valid_map or is_manual then
+        -- 탈착 대상이 하나도 체크되지 않았으면 아무것도 하지 않는다 (인벤토리를 열기 전에 먼저 판정)
+        if not Vakarine_equip_has_checked_slot() then
+            return
+        end
         g.vakarine_equip_field_boss = nil
         local inventory = ui.GetFrame("inventory")
         inventory:ShowWindow(1)
@@ -18264,6 +18302,9 @@ function Vakarine_equip_start_operation(is_manual)
         local animas_item = session.GetInvItemByName("NECK04_103")
         g.vakarine_equip_animas_iesid = animas_item and animas_item:GetIESID() or nil
         if #g.vakarine_equip_queue == 0 then
+            -- 체크는 있지만 해당 부위를 장비하지 않은 경우. 열어둔 인벤토리는 반드시 닫는다
+            -- (닫는 코드는 main_loop 최종 단계에만 있어서, 여기서 빠져나가면 열린 채로 남는다)
+            inventory:ShowWindow(0)
             ui.SetHoldUI(false)
             return
         end
@@ -18382,28 +18423,66 @@ function Vakarine_equip_holdui_release(frame)
     return 0
 end
 
+-- 장비 슬롯 체크박스 1개 생성 (create one equip-slot checkbox). 2단 배치에서 좌/우 열이 함께 쓴다.
+-- 이름에 "check_box"가 들어가야 Vakarine_equip_check_switch가 장비 체크로 인식한다
+function Vakarine_equip_create_slot_check(parent, equip_name, pos_x, pos_y)
+    local check_box = parent:CreateOrGetControl('checkbox', "check_box_" .. equip_name, pos_x, pos_y, 30, 30)
+    AUTO_CAST(check_box)
+    check_box:SetCheck(g.vakarine_equip_settings.chars[g.cid][equip_name])
+    check_box:SetTextTooltip(g.lang == "Japanese" and "{ol}チェックした装備を脱着します" or
+                                 "{ol}Remove and detach checked equipment")
+    check_box:SetEventScript(ui.LBUTTONUP, "Vakarine_equip_check_switch")
+    check_box:SetEventScriptArgString(ui.LBUTTONUP, equip_name)
+    -- ClMsg 키는 일부만 대소문자가 다르다 (ClMsg keys differ in case for some slots)
+    local label_key = equip_name
+    if equip_name == "RING1" then
+        label_key = "Ring1"
+    elseif equip_name == "RING2" then
+        label_key = "Ring2"
+    elseif equip_name == "SHIRT" then
+        label_key = "Shirt"
+    elseif equip_name == "PANTS" then
+        label_key = "Pants"
+    end
+    check_box:SetText("{ol}" .. ClMsg(label_key))
+    return check_box
+end
+
 function Vakarine_equip_config_frame_open()
     local config = ui.CreateNewFrame("notice_on_pc", addon_name_lower .. "vakarine_equip_config_frame", 0, 0, 0, 0)
     AUTO_CAST(config)
     config:RemoveAllChild()
     config:SetLayerLevel(999)
-    config:SetSkinName("test_frame_low")
+    config:SetSkinName(VE_SKIN)
+    config:SetAlpha(VE_ALPHA)
+    -- 설정창도 드래그로 이동 가능하게 ("프레임 고정" 체크박스는 작은 아이콘 쪽 설정이다)
+    config:SetTitleBarSkin("None")
+    config:EnableMove(1)
+    config:EnableHittestFrame(1)
+    config:SetEventScript(ui.LBUTTONUP, "Vakarine_equip_config_location_save")
     local title_text = config:CreateOrGetControl("richtext", "title_text", 10, 10)
     AUTO_CAST(title_text)
-    title_text:SetText("{ol}Vakarine Equip")
+    title_text:SetText("{ol}Vakarine Equip v" .. VE_VER)
+    -- 내부 groupbox는 스킨 없음 (groupbox엔 SetAlpha가 없어서 스킨을 주면 반투명이 안 된다)
     local config_gb = config:CreateOrGetControl("groupbox", "config_gb", 10, 40, 0, 0)
     AUTO_CAST(config_gb)
-    config_gb:SetSkinName("bg")
+    config_gb:SetSkinName("None")
+    -- SetImage는 이미지를 원본 크기(약 30px)로 그려서 컨트롤 크기를 무시한다 → {img} 텍스트로 그린다
     local close = config:CreateOrGetControl("button", "close", 0, 0, 20, 20)
     AUTO_CAST(close)
-    close:SetImage("testclose_button")
+    close:SetSkinName("None")
+    close:SetText("{img testclose_button 20 20}")
     close:SetGravity(ui.RIGHT, ui.TOP)
+    close:SetTextTooltip(g.lang == "Japanese" and "{ol}設定を閉じる" or "{ol}Close Config")
     close:SetEventScript(ui.LBUTTONUP, "Vakarine_equip_frame_close")
     local jsr_check = config_gb:CreateOrGetControl('checkbox', "jsr_check", 10, 5, 30, 30)
     AUTO_CAST(jsr_check)
     jsr_check:SetCheck(g.vakarine_equip_settings.jsr)
-    local text = g.lang == "Japanese" and "チェックするとJSRで作動" or "Activated in JSR when checked"
+    local text = g.lang == "Japanese" and "JSRで作動" or "Activate in JSR"
     jsr_check:SetText("{ol}" .. text)
+    jsr_check:SetTextTooltip(g.lang == "Japanese" and
+                                 "{ol}JSR(ボス協同戦 = 週間ボスレイドのマップ8種)に入った時に装備を付け外しするか{nl}通常のインスタンスダンジョンはこの設定に関係なく作動します" or
+                                 "{ol}Whether to swap gear when you enter JSR (boss co-op = the 8 weekly boss raid maps){nl}Regular instance dungeons run regardless of this")
     jsr_check:SetEventScript(ui.LBUTTONUP, "Vakarine_equip_check_switch")
     local x = 0
     local width = jsr_check:GetWidth()
@@ -18411,52 +18490,139 @@ function Vakarine_equip_config_frame_open()
         x = width
     end
     local y = 40
-    local equips = {"RH", "LH", "RH_SUB", "LH_SUB", "RING1", "RING2", "SHIRT", "PANTS", "GLOVES", "BOOTS", "SHOULDER",
-                    "BELT", "NECK"}
-    for i, equip_name in ipairs(equips) do
-        local check_box = config_gb:CreateOrGetControl('checkbox', "check_box" .. i, 20, y, 30, 30)
-        AUTO_CAST(check_box)
-        check_box:SetCheck(g.vakarine_equip_settings.chars[g.cid][equip_name])
-        check_box:SetTextTooltip(g.lang == "Japanese" and "{ol}チェックした装備を脱着します" or
-                                     "{ol}Remove and detach checked equipment")
-        check_box:SetEventScript(ui.LBUTTONUP, "Vakarine_equip_check_switch")
-        check_box:SetEventScriptArgString(ui.LBUTTONUP, equip_name)
-        if equip_name == "RING1" then
-            equip_name = "Ring1"
-        elseif equip_name == "RING2" then
-            equip_name = "Ring2"
-        elseif equip_name == "SHIRT" then
-            equip_name = "Shirt"
-        elseif equip_name == "PANTS" then
-            equip_name = "Pants"
+    -- 전체 선택/해제 토글 (cupole HUD와 같은 ability_on/off picture 방식)
+    local all_on = Vakarine_equip_is_all_checked()
+    -- 크기는 cupole HUD 토글과 동일한 51x22 (tosfighter pvpmodeBtn 규격)
+    local all_icon = config_gb:CreateOrGetControl("picture", "all_icon", 20, y + 4, 51, 22)
+    AUTO_CAST(all_icon)
+    all_icon:SetImage(all_on and "ability_on" or "ability_off")
+    all_icon:SetEnableStretch(1)
+    all_icon:EnableHitTest(1)
+    all_icon:SetEventScript(ui.LBUTTONUP, "Vakarine_equip_all_toggle")
+    all_icon:SetTextTooltip(g.lang == "Japanese" and "{ol}装備を全選択 / 全解除" or "{ol}Check / uncheck all slots")
+    local all_text = config_gb:CreateOrGetControl("richtext", "all_text", 78, y + 5)
+    AUTO_CAST(all_text)
+    all_text:SetText("{ol}" .. (g.lang == "Japanese" and "全選択/全解除" or "All on/off"))
+    all_text:EnableHitTest(0)
+    y = y + 35
+    -- 장비 목록은 2단 배치. 왼쪽 열을 먼저 만들어 실측 폭을 잰 뒤 오른쪽 열 X를 정한다
+    -- (build the left column first, measure it, then place the right column)
+    local row_h = 30
+    local list_top = y
+    local col_left_x = 20
+    local col_left_w = 0
+    for i, equip_name in ipairs(VE_COL_LEFT) do
+        local check_box = Vakarine_equip_create_slot_check(config_gb, equip_name, col_left_x,
+            list_top + (i - 1) * row_h)
+        if check_box:GetWidth() > col_left_w then
+            col_left_w = check_box:GetWidth()
         end
-        check_box:SetText("{ol}" .. ClMsg(equip_name))
-        y = y + 30
+    end
+    local col_right_x = col_left_x + col_left_w + 20
+    local col_right_w = 0
+    for i, equip_name in ipairs(VE_COL_RIGHT) do
+        local check_box = Vakarine_equip_create_slot_check(config_gb, equip_name, col_right_x,
+            list_top + (i - 1) * row_h)
+        if check_box:GetWidth() > col_right_w then
+            col_right_w = check_box:GetWidth()
+        end
+    end
+    -- 두 열 중 긴 쪽이 목록 높이, 오른쪽 열 끝이 창 폭 기준
+    local list_rows = math.max(#VE_COL_LEFT, #VE_COL_RIGHT)
+    y = list_top + list_rows * row_h
+    local list_right = col_right_x + col_right_w
+    if x < list_right then
+        x = list_right
     end
     y = y + 10
     local move_check = config_gb:CreateOrGetControl('checkbox', "move_check", 10, y, 30, 30)
     AUTO_CAST(move_check)
     move_check:SetCheck(g.vakarine_equip_settings.move)
-    move_check:SetText(g.lang == "Japanese" and "{ol}チェックするとフレーム固定" or
-                           "{ol}If checked, the frame is fixed")
+    move_check:SetText(g.lang == "Japanese" and "{ol}チェックするとアイコンを固定" or
+                           "{ol}If checked, the icon is fixed")
+    move_check:SetTextTooltip(g.lang == "Japanese" and "{ol}小さいアイコンの位置を固定します(この設定画面は常に移動できます)" or
+                                  "{ol}Locks the small floating icon (this config window can always be moved)")
     move_check:SetEventScript(ui.LBUTTONUP, "Vakarine_equip_check_switch")
-    y = y + 40
+    local move_width = 10 + move_check:GetWidth() -- 가장 긴 라벨이라 창 폭 기준이 되기 쉽다
+    if x < move_width then
+        x = move_width
+    end
+    y = y + 35
     local default_btn = config_gb:CreateOrGetControl("button", "default_btn", 20, y, 120, 30)
     AUTO_CAST(default_btn)
     default_btn:SetText(g.lang == "Japanese" and "{ol}フレーム初期位置" or "{ol}Init frame pos")
     default_btn:SetEventScript(ui.LBUTTONUP, "Vakarine_equip_location_save")
     y = y + 30
-    config:Resize(x + 70, y + 60)
-    config_gb:Resize(x + 50, y + 10)
-    local list_frame = ui.GetFrame(addon_name_lower .. "list_frame")
-    if list_frame then
-        config:SetPos(list_frame:GetX() + list_frame:GetWidth(), list_frame:GetY())
+    -- config_gb는 config 안에서 y=40에 있으므로 프레임 높이 = 40 + 내용 + 하단여백
+    local bottom_pad = 12
+    config:Resize(x + 40, 40 + y + bottom_pad)
+    config_gb:Resize(x + 20, y + bottom_pad)
+    -- 한 번 옮긴 위치는 유지한다 (체크할 때마다 이 함수가 다시 불려 재생성되므로)
+    local saved_x = g.vakarine_equip_settings.config_x
+    local saved_y = g.vakarine_equip_settings.config_y
+    if saved_x and saved_y and (saved_x > 0 or saved_y > 0) then
+        config:SetPos(saved_x, saved_y)
     else
-        local map_frame = ui.GetFrame("map")
-        local width = map_frame:GetWidth()
-        config:SetPos(width / 2 - config:GetWidth() / 2 or 1165, 105)
+        local list_frame = ui.GetFrame(addon_name_lower .. "list_frame")
+        if list_frame then
+            config:SetPos(list_frame:GetX() + list_frame:GetWidth(), list_frame:GetY())
+        else
+            local map_frame = ui.GetFrame("map")
+            local width = map_frame:GetWidth()
+            config:SetPos(width / 2 - config:GetWidth() / 2 or 1165, 105)
+        end
     end
     config:ShowWindow(1)
+end
+
+function Vakarine_equip_config_location_save(frame)
+    local pos_x = frame:GetX()
+    local pos_y = frame:GetY()
+    if pos_x == g.vakarine_equip_settings.config_x and pos_y == g.vakarine_equip_settings.config_y then
+        return -- 드래그하지 않은 단순 클릭
+    end
+    g.vakarine_equip_settings.config_x = pos_x
+    g.vakarine_equip_settings.config_y = pos_y
+    Vakarine_equip_save_settings()
+end
+
+function Vakarine_equip_has_checked_slot()
+    local char_settings = g.vakarine_equip_settings.chars[g.cid]
+    if not char_settings then
+        return false
+    end
+    for _, equip_name in ipairs(VE_EQUIP_SLOTS) do
+        if char_settings[equip_name] == 1 then
+            return true
+        end
+    end
+    return false
+end
+
+function Vakarine_equip_is_all_checked()
+    local char_settings = g.vakarine_equip_settings.chars[g.cid]
+    if not char_settings then
+        return false
+    end
+    for _, equip_name in ipairs(VE_EQUIP_SLOTS) do
+        if char_settings[equip_name] ~= 1 then
+            return false
+        end
+    end
+    return true
+end
+
+function Vakarine_equip_all_toggle()
+    local char_settings = g.vakarine_equip_settings.chars[g.cid]
+    if not char_settings then
+        return
+    end
+    local new_value = Vakarine_equip_is_all_checked() and 0 or 1
+    for _, equip_name in ipairs(VE_EQUIP_SLOTS) do
+        char_settings[equip_name] = new_value
+    end
+    Vakarine_equip_save_settings()
+    Vakarine_equip_config_frame_open()
 end
 
 function Vakarine_equip_check_switch(config, ctrl, equip_name, num)
@@ -22884,10 +23050,19 @@ end
 
 function Quickslot_operate_check_all_slots(race, down_potion_id, atk_id, def_id)
     local quickslotnexpbar = ui.GetFrame("quickslotnexpbar")
-    local joystickquickslot = ui.GetFrame('joystickquickslot')
-    if IsJoyStickMode() == 1 then
+    -- SET_QUICK_SLOT's Item branch only writes while the target frame is shown -- verified
+    -- in-game: without ShowWindow(1) the potion never changes. Skill writes (cupole_manager)
+    -- do work on a hidden frame, so this is an Item-only constraint.
+    -- Alpha 0 keeps the bar from flashing during the brief show. The joystick bar is never
+    -- touched: hiding it used to leave it gone.
+    -- SET_QUICK_SLOT의 Item 분기는 대상 프레임이 표시된 상태에서만 기록된다 -- 인게임 확인:
+    -- ShowWindow(1)이 없으면 물약이 안 바뀐다. Skill 기록(cupole_manager)은 숨겨진 프레임에서도
+    -- 되므로 Item 전용 제약이다. 잠깐 띄우는 동안 깜빡이지 않도록 알파 0으로 둔다.
+    -- 조이스틱 바는 건드리지 않는다(숨기면 복귀가 안 됐다).
+    local joystick_mode = IsJoyStickMode() == 1
+    if joystick_mode then
+        quickslotnexpbar:SetAlpha(0)
         quickslotnexpbar:ShowWindow(1)
-        joystickquickslot:ShowWindow(0)
     end
     local atk_list = g.quickslot_operate_atk_list
     for i = 1, MAX_QUICKSLOT_CNT do
@@ -22945,10 +23120,11 @@ function Quickslot_operate_check_all_slots(race, down_potion_id, atk_id, def_id)
     quickslot_operate_map_timer:Stop()
     quickslot.RequestSave()
     QUICKSLOTNEXPBAR_UPDATE_HOTKEYNAME(quickslotnexpbar)
-    if IsJoyStickMode() == 1 then
+    if joystick_mode then
         quickslotnexpbar:ShowWindow(0)
-        joystickquickslot:ShowWindow(1)
+        quickslotnexpbar:SetAlpha(100)
     end
+    DebounceScript("QUICKSLOTNEXTBAR_UPDATE_ALL_SLOT", 0.1)
     DebounceScript("JOYSTICK_QUICKSLOT_UPDATE_ALL_SLOT", 0.1)
 end
 
@@ -23056,12 +23232,10 @@ function Quickslot_operate_set_rshift_script()
     if keyboard.IsKeyPressed("RSHIFT") == 0 then
         return
     end
-    local quickslotnexpbar = ui.GetFrame("quickslotnexpbar")
-    local joystickquickslot = ui.GetFrame('joystickquickslot')
-    if IsJoyStickMode() == 1 then
-        quickslotnexpbar:ShowWindow(1)
-        joystickquickslot:ShowWindow(0)
-    end
+    -- No bar visibility handling here: this function only reads session data and
+    -- Quickslot_operate_check_all_slots does the show/hide around the actual slot writes.
+    -- 여기선 바 표시를 건드리지 않는다. 이 함수는 세션 데이터만 읽고, 실제 슬롯 기록은
+    -- Quickslot_operate_check_all_slots가 자체적으로 표시 처리를 한다.
     local current_potion_type = nil
     for i = 1, MAX_QUICKSLOT_CNT do
         local slot_info = quickslot.GetInfoByIndex(i - 1)
@@ -23115,11 +23289,6 @@ function Quickslot_operate_set_rshift_script()
     if target_race then
         Quickslot_operate_check_all_slots(target_race, nil, found_atk_id, found_def_id)
         quickslot.RequestSave()
-    end
-
-    if IsJoyStickMode() == 1 then
-        quickslotnexpbar:ShowWindow(0)
-        joystickquickslot:ShowWindow(1)
     end
 end
 -- quickslot_operate ここまで
