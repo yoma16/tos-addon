@@ -4,10 +4,10 @@
     "name": "Cupole manager",
     "file": "cupole_manager",
     "extension": "ipf",
-    "fileVersion": "v1.0.2",
-    "releaseTag": "cupole_preset_v1.0.2",
+    "fileVersion": "v1.0.3",
+    "releaseTag": "cupole_preset_v1.0.3",
     "unicode": "⛄",
-    "description": "큐폴 관리 애드온. 프리셋을 관리하고 쉽게 적용할 수 있습니다.<br> 변경이 완료되면 슬롯에 있는 큐폴 스킬도 맞춰서 변경해줍니다.<br> v1.0.2: 마을에서 화면 오른쪽에 뜨는 프리셋 HUD(토글 바)로 저장된 프리셋을 바로 적용할 수 있습니다.<br> Cupole manager. You can manage cupole preset and apply them easy <br>the Cupole skill in your slot will automatically change to the Cupole skill in the center as well!!!<br> v1.0.2: apply saved presets from an on-screen HUD (a toggle bar shown at the right edge, in town only).",
+    "description": "큐폴 관리 애드온. 프리셋을 관리하고 쉽게 적용할 수 있습니다.<br> 변경이 완료되면 슬롯에 있는 큐폴 스킬도 맞춰서 변경해줍니다.<br> v1.0.3: 왼쪽/오른쪽 큐폴이 서로 바뀐 채로 저장되던 버그를 고쳤습니다(이전에 저장한 프리셋은 한 번 다시 저장해 주세요). 설정창을 노리산 메뉴에서 빼고 HUD의 톱니 버튼으로 열고 닫도록 바꿨으며, 창 배경을 HUD와 같은 반투명으로 통일하고 슬롯과 이름을 좌우로 나눠 다시 배치했습니다.<br> v1.0.2: 마을에서 화면 오른쪽에 뜨는 프리셋 HUD(토글 바)로 저장된 프리셋을 바로 적용할 수 있습니다.<br> Cupole manager. You can manage cupole presets and apply them easily.<br> The Cupole skill in your slot changes to match as well.<br> v1.0.3: fixed the left and right Cupoles being stored swapped (please re-save any preset made before this version). The settings window left the Norisan menu and is now opened and closed by the gear on the HUD. It also uses the same translucent background as the HUD, and the slots and the name are laid out side by side.<br> v1.0.2: apply saved presets from an on-screen HUD (a toggle bar shown at the right edge, in town only).<br> クポル管理アドオン。プリセットを管理して簡単に適用できます。<br> v1.0.3: 左右のクポルが入れ替わって保存されるバグを修正しました(以前のプリセットは一度保存し直してください)。設定ウィンドウはノリサンメニューから外し、HUDの歯車ボタンで開閉するようにしました。背景もHUDと同じ半透明に統一し、スロットと名前を左右に分けて配置しました。",
     "tags": ["yomae", "cupole", "addons", "cupole manager", "cupole preset", "preset", "요매", "yoma16", "큐폴"]
   },
   {
@@ -22,14 +22,14 @@
     "tags": ["yomae", "cupole", "addons", "toggle cupole potion", "toggle", "potion", "요매", "yoma16", "큐폴"]
   },
   {
-    "tosversion" : "20260718",
+    "tosversion" : "20260729",
     "name": "New Nexus Addons",
     "file": "new_nexus_addons",
     "extension": "ipf",
     "fileVersion": "v1.0.8",
     "releaseTag": "new_nexus_addons_v-1.0.8",
     "unicode": "⛄",
-    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.0.8: Vakarine Equip이 도시 밖 모든 맵에서 장비를 탈착하던 버그 수정(주간 보스 레이드는 체크박스로 선택), 설정창 반투명·2단 배치·전체 선택 토글 추가. 조이스틱 퀵슬롯 사용 시 물약 교체 후 퀵슬롯 바가 사라지던 버그 수정. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.0.8: fixed Vakarine Equip swapping gear on every non-city map (weekly boss raids are now opt-in via the checkbox), plus a translucent two-column config window with a select-all toggle. Fixed the joystick quickslot bar disappearing after a potion swap. <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.0.8: Vakarine Equipが都市以外の全マップで装備を着脱していたバグを修正(週間ボスレイドはチェックボックスで選択)、設定ウィンドウの半透明化・2列配置・全選択トグル追加。ジョイスティッククイックスロット使用時、ポーション変更後にバーが消えるバグを修正。",
+    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.0.8: Vakarine Equip이 도시 밖 모든 맵에서 장비를 탈착하던 버그 수정(보스협동전은 체크박스로 선택), 설정창 반투명·2단 배치·전체 선택 토글 추가. 조이스틱 퀵슬롯 사용 시 물약 교체 후 퀵슬롯 바가 사라지던 버그 수정. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.0.8: fixed Vakarine Equip swapping gear on every non-city map (weekly boss raids are now opt-in via the checkbox), plus a translucent two-column config window with a select-all toggle. Fixed the joystick quickslot bar disappearing after a potion swap. <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.0.8: Vakarine Equipが都市以外の全マップで装備を着脱していたバグを修正(週間ボスレイドはチェックボックスで選択)、設定ウィンドウの半透明化・2列配置・全選択トグル追加。ジョイスティッククイックスロット使用時、ポーション変更後にバーが消えるバグを修正。",
     "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
   },
   {
