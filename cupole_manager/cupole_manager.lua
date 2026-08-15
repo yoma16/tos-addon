@@ -1,8 +1,9 @@
 -- v1.0.0 first release
 -- v1.0.1 fix slot remap and speed up summon interval
 -- v1.0.2 add always-on-screen preset HUD (labeled toggle button + separate compact preset panel)
+-- v1.0.3 add a "made by" credit line with the guild emblem at the bottom of the preset window
 local addonName = "cupole_manager"
-local version = "1.0.2"
+local version = "1.0.3"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -14,8 +15,32 @@ local g = _G["ADDONS"][author][addonName]
 local acutil = require("acutil")
 local json = require("json")
 
+-- 이 팀으로 접속하면 애드온 설정을 일절 쓰지 않는다. 저장은 빈 값으로만 하고, 읽기는 항상
+-- 없는 것으로 취급해서 매번 기본값으로 시작한다(저장만 막으면 이미 저장돼 있던 설정이 계속
+-- 로드되므로 둘 다 막아야 한다)
+-- teams that never use addon settings: writes go out empty and reads always report "missing",
+-- so every login starts from defaults (blocking writes alone would still load older saves)
+local CM_NO_SAVE_TEAMS = {
+    ["유니우스"] = true,
+    ["파비우스"] = true,
+    ["이그너스"] = true
+}
+
+local function CM_is_no_save_team()
+    -- 로그인 전에는 팀명을 못 얻을 수 있다. 실패하면 평소대로 동작시킨다
+    -- the team name may not exist before login; fall back to normal behaviour
+    local ok, team_name = pcall(GETMYFAMILYNAME)
+    if not ok or type(team_name) ~= "string" then
+        return false
+    end
+    return CM_NO_SAVE_TEAMS[team_name] == true
+end
+
 -- Infrastructure: save_json (safe tmp-file write)
 local function CM_save_json(path, tbl)
+    if CM_is_no_save_team() then
+        tbl = {}
+    end
     local success, str = pcall(json.encode, tbl)
     if not success then
         return false
@@ -37,6 +62,9 @@ end
 
 -- Infrastructure: load_json (BOM handling, tmp fallback)
 local function CM_load_json(path)
+    if CM_is_no_save_team() then
+        return nil
+    end
     local file = io.open(path, "r")
     if not file then
         local tmp_file = io.open(path .. ".tmp", "r")
@@ -117,6 +145,22 @@ end
 
 CM_create_folder("../addons")
 CM_create_folder("../addons/" .. addonNameLower)
+
+-- 슬롯 리맵. 게임 슬롯 번호는 0=Center, 1=Right, 2=Left 이다(인게임 실측).
+-- 프리셋은 1=Center, 2=Left, 3=Right 로 저장하므로 쓸 때 이 표로 변환한다
+-- slot remap; game slot numbers are 0=Center, 1=Right, 2=Left (measured in game).
+-- presets store 1=Center, 2=Left, 3=Right, so writes go through this table
+local CM_SLOT_REMAP = {[0] = 0, [1] = 2, [2] = 1}
+
+-- ⚠️ GET_EQUIP_CUPOLE_LIST() 도 게임 슬롯 순서(1=game0, 2=game1, 3=game2)로 돌려준다.
+-- 즉 읽을 때도 같은 변환이 필요한데 그게 빠져 있어서 Left/Right 가 서로 바뀌어 저장됐다
+-- (Center 는 game0=1 로 우연히 일치해서 멀쩡했다)
+-- GET_EQUIP_CUPOLE_LIST() is indexed by game slot too (1=game0, 2=game1, 3=game2), so reads
+-- need the same conversion; it was missing, which stored Left and Right swapped
+-- (Center happened to line up, so only left/right looked wrong)
+local function CM_equip_index(preset_index)
+    return CM_SLOT_REMAP[preset_index - 1] + 1
+end
 
 -- ============================================================
 -- Init
@@ -200,7 +244,7 @@ function CM_auto_summon()
     if CM_get_map_type() == "City" then
         local equip_cupole_list = GET_EQUIP_CUPOLE_LIST()
         for i = 1, 3 do
-            if equip_cupole_list[i] == "-1" then
+            if equip_cupole_list[CM_equip_index(i)] == "-1" then
                 CM_set_cupole_slots()
                 break
             end
@@ -236,16 +280,16 @@ end
 function CM_CLOSE_CUPOLE_ITEM(parent, ctrl)
     local equip_cupole_list = GET_EQUIP_CUPOLE_LIST()
     for i = 1, 3 do
-        local cupole_cls = GET_CUPOLE_BY_INDEX_IN_CLASSLIST(equip_cupole_list[i])
+        local cupole_cls = GET_CUPOLE_BY_INDEX_IN_CLASSLIST(equip_cupole_list[CM_equip_index(i)])
         local cupole_class_name = TryGetProp(cupole_cls, "ClassName", "None")
-        if equip_cupole_list[i] ~= "-1" then
+        if equip_cupole_list[CM_equip_index(i)] ~= "-1" then
             g.cupole_manager_settings[g.cid][tostring(i)] = {
-                id = equip_cupole_list[i],
+                id = equip_cupole_list[CM_equip_index(i)],
                 name = cupole_class_name
             }
             if not g.cupole_manager_settings["default"][tostring(i)] then
                 g.cupole_manager_settings["default"][tostring(i)] = {
-                    id = equip_cupole_list[i],
+                    id = equip_cupole_list[CM_equip_index(i)],
                     name = cupole_class_name
                 }
             end
@@ -257,17 +301,17 @@ end
 function CM_save_default_settings()
     local equip_cupole_list = GET_EQUIP_CUPOLE_LIST()
     for i = 1, 3 do
-        if equip_cupole_list[i] == "-1" then
+        if equip_cupole_list[CM_equip_index(i)] == "-1" then
             ui.SysMsg(g.lang == "Japanese" and "クポルが3体登録されていません" or
                           "3 Cupoles are not registered")
             return
         end
     end
     for i = 1, 3 do
-        local cupole_cls = GET_CUPOLE_BY_INDEX_IN_CLASSLIST(equip_cupole_list[i])
+        local cupole_cls = GET_CUPOLE_BY_INDEX_IN_CLASSLIST(equip_cupole_list[CM_equip_index(i)])
         local cupole_class_name = TryGetProp(cupole_cls, "ClassName", "None")
         g.cupole_manager_settings["default"][tostring(i)] = {
-            id = equip_cupole_list[i],
+            id = equip_cupole_list[CM_equip_index(i)],
             name = cupole_class_name
         }
     end
@@ -311,9 +355,6 @@ function CM_set_cupole_slots()
     cm_frame:RunUpdateScript("CM_summon_cupole", 0.3)
 end
 
--- slot remap: UI key 1=Center(slot1), 2=Left(slot2→game0), 3=Right(slot0→game2)
-local CM_SLOT_REMAP = {[0] = 0, [1] = 2, [2] = 1}
-
 function CM_summon_cupole(frame)
     if g.cupole_manager_num == 3 then
         frame:StopUpdateScript("CM_summon_cupole")
@@ -327,16 +368,16 @@ end
 -- ============================================================
 -- Norisan Menu
 -- ============================================================
+-- 이 애드온은 노리산 메뉴에 항목을 올리지 않는다. 프리셋 창은 HUD 의 톱니 버튼으로 연다.
+-- 다만 메뉴 구현체는 여기 들어 있으므로(다른 애드온이 쓸 수 있게) 프레임 생성은 유지한다.
+-- 예전 항목이 메뉴 설정 json 에 남아 있을 수 있어 등록 해제도 명시적으로 해 준다
+-- this addon no longer puts an item on the norisan menu - the gear on the HUD opens the preset
+-- window instead. the menu implementation still lives here for other addons, so keep creating
+-- the frame, and clear our stale entry which may persist in the menu's settings json
 function CM_make_menu()
     _G["norisan"] = _G["norisan"] or {}
     _G["norisan"]["MENU"] = _G["norisan"]["MENU"] or {}
-    _G["norisan"]["MENU"]["cupole_preset"] = {
-        name = "Cupole Preset",
-        icon = "sysmenu_cupole_info",
-        func = "CM_preset_frame_open",
-        rfunc = "CM_hud_toggle",
-        image = ""
-    }
+    _G["norisan"]["MENU"]["cupole_preset"] = nil
     local frame_name = _G["norisan"]["MENU"].frame_name
     local menu_frame = ui.GetFrame(frame_name)
     if menu_frame and frame_name ~= "norisan_menu_frame" then
@@ -345,6 +386,124 @@ function CM_make_menu()
     frame_name = "norisan_menu_frame"
     _G["norisan"]["MENU"].frame_name = frame_name
     g.norisan_menu_create_frame()
+end
+
+-- 프리셋 창 배경 스킨. 한 줄만 바꾸면 원래(불투명 test_frame_low)로 되돌릴 수 있다
+-- preset window background skin; revert to "test_frame_low" here for the old opaque look
+-- HUD(토글 바/패널)와 설정창이 같은 배경을 쓰도록 한 곳에서 정의한다.
+-- groupbox 는 SetAlpha 가 없어서 스킨으로만 투명도를 낼 수 있지만, frame 은 SetAlpha 가 되므로
+-- 프레임 스킨 bg2 + 알파 쪽이 더 맑고(희끄무레) 톤도 HUD 와 정확히 일치한다
+-- one definition so the HUD bars and the settings window share a background.
+-- a groupbox can only get transparency from its skin, but a frame takes SetAlpha - the
+-- bg2-skin-plus-alpha route looks cleaner and matches the HUD exactly
+local CM_UI_SKIN = "bg2"
+local CM_UI_ALPHA = 110
+-- 탭 판때기 색. 클라에 있는 탭 스킨: tab2(기본, 누런색) tab3 tab4 adventure_tab colony_tab
+-- tab plate skin; client tab skins: tab2 (default, the yellow one) tab3 tab4 adventure_tab colony_tab
+local CM_PRESET_TAB_SKIN = "tab3"
+local CM_PRESET_SAVE_TEXT = "{ol}{s12}Save"
+
+-- ============================================================
+-- Credit line ("made by [guild emblem] name")
+--   길드 엠블럼은 UI 이미지가 아니라 서버에서 받아오는 PNG 라서 SetImage 가 아니라
+--   picture:SetFileName 으로 붙인다 (colony_battle_info.lua:247-268 계약).
+--   글자 폭은 상수로 잡으면 엠블럼과 겹치므로 GetTextWidth 로 재서 오른쪽 정렬한다
+--   the guild emblem is a downloaded PNG, not a UI image, so it goes in through
+--   picture:SetFileName; the caption width is measured, never guessed, or it overlaps
+-- ============================================================
+local CM_CREDIT_H = 18
+local CM_CREDIT_EMBLEM = 16
+local CM_CREDIT_GAP = 3
+local CM_CREDIT_PAD = 20
+local CM_CREDIT_MADEBY_W = 64   -- GetTextWidth 실패 시 예비 폭 / fallback if the measure fails
+local CM_CREDIT_NAME_W = 44
+local CM_CREDIT_GUILD_ID = "1038076415618784"    -- 고양이젤리
+local CM_CREDIT_WHISPER_NAME = "요매"             -- 표기는 언어별로 바뀌어도 귓말 대상은 실제 팀명
+
+-- ⚠️ GetTextWidth / Resize / SetEventScript 는 캐스팅된 ui::CRichText 에만 있다.
+-- AUTO_CAST 없이 부르면 에러가 나고, 그러면 이 컨트롤을 만든 창이 통째로 안 열린다
+-- (클라 선례도 전부 tolua.cast / GET_CHILD(...,"ui::CRichText") 후 호출한다)
+-- these methods live on a cast ui::CRichText; calling them on an uncast control errors out and
+-- the whole window silently fails to open - every client precedent casts first
+function CM_credit_render(parent, parent_w, y, pad)
+    pad = pad or CM_CREDIT_PAD
+    local tip = g.lang == "kr" and "{ol}요매에게 귓속말" or "{ol}Whisper to Yomae"
+
+    local made_by = parent:CreateOrGetControl("richtext", "credit_madeby", pad, y, CM_CREDIT_MADEBY_W, CM_CREDIT_H)
+    AUTO_CAST(made_by)
+    made_by:SetText("{ol}{s12}{#AAAAAA}made by")
+
+    local name = parent:CreateOrGetControl("richtext", "credit_name", pad, y, CM_CREDIT_NAME_W, CM_CREDIT_H)
+    AUTO_CAST(name)
+    name:SetText("{ol}{s12}" .. (g.lang == "kr" and "요매" or "Yomae"))
+
+    -- 이름 길이가 언어마다 다르므로(요매 < Yomae) 폭은 상수로 잡지 않고 잰다
+    -- the name differs in length per language, so measure instead of assuming
+    local made_w = made_by:GetTextWidth()
+    if not made_w or made_w <= 0 then
+        made_w = CM_CREDIT_MADEBY_W
+    end
+    local name_w = name:GetTextWidth()
+    if not name_w or name_w <= 0 then
+        name_w = CM_CREDIT_NAME_W
+    end
+    made_by:Resize(made_w, CM_CREDIT_H)
+    name:Resize(name_w, CM_CREDIT_H)
+
+    local total_w = made_w + CM_CREDIT_GAP + CM_CREDIT_EMBLEM + CM_CREDIT_GAP + name_w
+    local cx = math.max(0, parent_w - pad - total_w)
+    made_by:SetOffset(cx, y)
+
+    local emblem = parent:CreateOrGetControl("picture", "credit_emblem", cx + made_w + CM_CREDIT_GAP,
+        y + math.floor((CM_CREDIT_H - CM_CREDIT_EMBLEM) / 2), CM_CREDIT_EMBLEM, CM_CREDIT_EMBLEM)
+    AUTO_CAST(emblem)
+    emblem:SetEnableStretch(1)
+
+    name:SetOffset(cx + made_w + CM_CREDIT_GAP + CM_CREDIT_EMBLEM + CM_CREDIT_GAP, y)
+
+    -- 누르면 요매에게 귓속말 (ui.WhisperTo 는 팀명을 받는다 / takes the family name)
+    -- 클릭은 picture 에만 건다. 런타임에 만든 richtext 에 SetEventScript 를 거는 선례가
+    -- 클라에 0건이고 실제로도 반응하지 않았다. picture 는 확실히 동작한다(HUD 토글 아이콘)
+    -- only the picture takes the click: there is no client precedent for SetEventScript on a
+    -- runtime-created richtext and it did not fire in game; pictures are proven (the HUD icon)
+    emblem:EnableHitTest(true)
+    emblem:SetEventScript(ui.LBUTTONUP, "CM_credit_whisper")
+    emblem:SetTextTooltip(tip)
+
+    -- 엠블럼은 서버에서 받아오므로 비동기다. 실패하면 글자만 남는다
+    -- fetching the emblem is async; on failure only the text remains
+    pcall(GetGuildEmblemImage, "CM_credit_emblem_loaded", CM_CREDIT_GUILD_ID)
+end
+
+function CM_credit_whisper()
+    pcall(ui.WhisperTo, CM_CREDIT_WHISPER_NAME)
+end
+
+-- 크레딧은 프리셋 창과 HUD 패널 양쪽에 있으므로 둘 다 갱신한다
+-- the credit lives in both the preset window and the HUD panel, so update whichever exists
+function CM_credit_emblem_loaded(code, return_json)
+    if code ~= 200 then
+        return
+    end
+    local ok_w, world_id = pcall(session.party.GetMyWorldIDStr)
+    if not ok_w then
+        return
+    end
+    local ok_n, image_name = pcall(guild.GetEmblemImageName, CM_CREDIT_GUILD_ID, world_id)
+    if not ok_n or not image_name then
+        return
+    end
+    local frame_names = {addonNameLower .. "_preset", addonNameLower .. "_hud_panel"}
+    for i = 1, #frame_names do
+        local frame = ui.GetFrame(frame_names[i])
+        if frame then
+            local emblem = GET_CHILD(frame, "credit_emblem")
+            if emblem then
+                emblem:SetImage("")
+                emblem:SetFileName(image_name)
+            end
+        end
+    end
 end
 
 -- ============================================================
@@ -393,6 +552,32 @@ function CM_preset_get_active_skill_name(cupole_index)
     return "None"
 end
 
+-- 창 크기와 세로 배치. 섹션 머리글 + 구분선이 들어가면서 520 -> 580 으로 키웠다
+-- window size and vertical rhythm; grew 520 -> 580 to fit section headers and dividers
+local CM_PW = 560
+local CM_PH = 510
+local CM_PPAD = 20
+local CM_PINNER = CM_PW - CM_PPAD * 2
+local CM_PEDIT_INSET = 6            -- 입력 edit 이 박스 안으로 들어간 양 / how far the edit is inset
+-- 이름과 슬롯을 좌우 반반으로 나눈다 / name and slots share the row, split in half
+local CM_PHALF_GAP = 10
+local CM_PHALF_W = math.floor((CM_PINNER - CM_PHALF_GAP) / 2)
+local CM_PRIGHT_X = CM_PPAD + CM_PHALF_W + CM_PHALF_GAP
+local CM_PSLOT_X = CM_PPAD + CM_PEDIT_INSET   -- 슬롯 열 시작 = 왼쪽 절반의 글자 기준선
+
+-- 섹션 머리글: HUD 라벨과 같은 white_16_ol 아웃라인 글꼴 + 아래 구분선(labelline)
+-- section header: the same outlined white_16_ol as the HUD label, with a divider under it
+function CM_preset_section(parent, name, x, y, w, text)
+    local label = parent:CreateOrGetControl("richtext", name .. "_label", x, y, w, 20)
+    AUTO_CAST(label)
+    label:SetFontName("white_16_ol")
+    label:SetText("{s14}" .. text)
+    label:EnableHitTest(false)
+    local line = parent:CreateOrGetControl("labelline", name .. "_line", x, y + 20, w, 3)
+    AUTO_CAST(line)
+    line:SetSkinName("labelline2")
+end
+
 function CM_preset_frame_open()
     if not g.cupole_manager_settings then
         CM_load_settings()
@@ -405,8 +590,9 @@ function CM_preset_frame_open()
     frame = ui.CreateNewFrame("notice_on_pc", frame_name, 0, 0, 0, 0)
     AUTO_CAST(frame)
     frame:RemoveAllChild()
-    frame:Resize(560, 520)
-    frame:SetSkinName("None")
+    frame:Resize(CM_PW, CM_PH)
+    frame:SetSkinName(CM_UI_SKIN)
+    frame:SetAlpha(CM_UI_ALPHA)
     frame:SetTitleBarSkin("None")
     frame:SetLayerLevel(92)
     frame:EnableHittestFrame(1)
@@ -414,20 +600,24 @@ function CM_preset_frame_open()
 
     local sw = ui.GetClientInitialWidth()
     local sh = ui.GetClientInitialHeight()
-    frame:SetPos((sw - 560) / 2, (sh - 520) / 2)
+    frame:SetPos((sw - CM_PW) / 2, (sh - CM_PH) / 2)
 
-    local bg = frame:CreateOrGetControl("groupbox", "bg", 560, 480, ui.LEFT, ui.TOP, 0, 40, 0, 0)
+    -- 반투명 배경 하나로 창 전체를 덮는다(제목 영역까지). groupbox 는 SetAlpha 가 없으므로
+    -- 투명도는 스킨으로 낸다 — op_50 계열은 클라에서 13건 전부 groupbox 에 쓰이는 검증된 스킨.
+    -- 탭은 자기 스킨으로 그려지므로 배경을 투명하게 해도 그대로 보인다
+    -- one translucent panel covers the whole window, title strip included. groupbox has no
+    -- SetAlpha, so transparency comes from the skin: every client use of the op_50 family (13)
+    -- is on a groupbox. the tab keeps its own skin and renders unaffected
+    local bg = frame:CreateOrGetControl("groupbox", "bg", CM_PW, CM_PH, ui.LEFT, ui.TOP, 0, 0, 0, 0)
     AUTO_CAST(bg)
-    bg:SetSkinName("test_frame_low")
+    bg:SetSkinName("None")
     bg:EnableHittestGroupBox(false)
 
-    local title_bg = frame:CreateOrGetControl("groupbox", "title_bg", 560, 61, ui.LEFT, ui.TOP, 0, 0, 0, 0)
-    AUTO_CAST(title_bg)
-    title_bg:SetSkinName("test_frame_top")
-    title_bg:EnableHittestGroupBox(false)
-
-    local title = frame:CreateOrGetControl("richtext", "title", 100, 30, ui.CENTER_HORZ, ui.TOP, 0, 18, 0, 0)
-    title:SetText("{@st43}{s22}Cupole Preset Manager{/}")
+    -- 제목도 섹션 머리글과 같은 왼쪽 기준선(CM_PPAD)에 맞춘다
+    -- the title lines up with the section headers on the same left edge
+    local title = frame:CreateOrGetControl("richtext", "title", CM_PINNER, 30, ui.LEFT, ui.TOP, CM_PPAD, 18, 0, 0)
+    AUTO_CAST(title)
+    title:SetText("{@st43}{s22}Cupole Preset Setting{/}")
     title:EnableHitTest(false)
 
     local close = frame:CreateOrGetControl("button", "close", 44, 44, ui.RIGHT, ui.TOP, 0, 20, 17, 0)
@@ -435,10 +625,10 @@ function CM_preset_frame_open()
     close:SetImage("testclose_button")
     close:SetEventScript(ui.LBUTTONUP, "CM_preset_frame_close")
 
-    local tab = frame:CreateOrGetControl("tab", "tab", 520, 40, ui.LEFT, ui.TOP, 20, 65, 0, 0)
+    local tab = frame:CreateOrGetControl("tab", "tab", CM_PINNER, 40, ui.LEFT, ui.TOP, CM_PPAD, 65, 0, 0)
     AUTO_CAST(tab)
     tab:SetEventScript(ui.LBUTTONUP, "CM_preset_tab_change")
-    tab:SetSkinName("tab2")
+    tab:SetSkinName(CM_PRESET_TAB_SKIN)
     for i = 1, 10 do
         local preset = g.cupole_manager_settings.presets[tostring(i - 1)]
         local tab_label = preset and preset.name and preset.name ~= "" and preset.name or ("Set " .. i)
@@ -447,79 +637,116 @@ function CM_preset_frame_open()
     tab:SetItemsFixWidth(52)
     tab:SetItemsAdjustFontSizeByWidth(52)
 
-    local name_label = frame:CreateOrGetControl("richtext", "name_label", 20, 110, 80, 30)
-    name_label:SetText("{ol}{s14}Set Name:")
-    name_label:EnableHitTest(false)
+    CM_preset_section(frame, "sec_slot", CM_PPAD, 112, CM_PHALF_W, "SLOTS")
 
-    local name_edit = frame:CreateOrGetControl("edit", "name_edit", 100, 108, 200, 30)
+    -- 투명 배경에선 edit 스킨(inventory_serch)이 배경에 묻히고 아래가 잘려 보였다.
+    -- 클라 search_editbox 방식: 보이는 박스(groupbox)를 깔고 그 안에 skin 없는 edit 을 넣는다
+    -- on a translucent background the edit skin blended in and looked clipped at the bottom;
+    -- use the client's search_editbox shape: a visible box with a skinless edit inset in it
+    local name_bg = frame:CreateOrGetControl("groupbox", "name_bg", CM_PHALF_W, 28, ui.LEFT, ui.TOP, CM_PRIGHT_X, 138, 0,
+        0)
+    AUTO_CAST(name_bg)
+    name_bg:SetSkinName("test_weight_skin")
+    name_bg:EnableHitTest(0)
+
+    local name_edit = frame:CreateOrGetControl("edit", "name_edit", CM_PRIGHT_X + CM_PEDIT_INSET, 143,
+        CM_PHALF_W - CM_PEDIT_INSET * 2, 20)
     AUTO_CAST(name_edit)
+    name_edit:SetSkinName("None")
     name_edit:SetFontName("white_14_ol")
     name_edit:SetTextAlign("left", "center")
-    name_edit:SetSkinName("inventory_serch")
+
+    CM_preset_section(frame, "sec_name", CM_PRIGHT_X, 112, CM_PHALF_W, "NAME")
 
     local slot_positions = {[2] = 0, [1] = 1, [3] = 2}
     local slot_labels = {[1] = "Center", [2] = "Left", [3] = "Right"}
+    -- 슬롯 열의 시작을 이름 입력칸 '글자'와 같은 선에 맞춘다. 입력 edit 이 박스 안쪽으로
+    -- 6px 들어가 있으므로 슬롯도 그만큼 오른쪽으로 민다
+    -- start the slot column on the same line as the name field's *text*: the edit is inset 6px
+    -- inside its box, so the slots shift right by the same amount
     for slot = 1, 3 do
-        local sx = 20 + slot_positions[slot] * 80
-        local border = frame:CreateOrGetControl("picture", "slot_border_" .. slot, sx - 3, 160, 66, 66)
+        local sx = CM_PSLOT_X + slot_positions[slot] * 80
+        local slot_label = frame:CreateOrGetControl("richtext", "slot_label_" .. slot, sx, 138, 60, 12)
+        AUTO_CAST(slot_label)
+        slot_label:SetText("{ol}{s11}{#aaaaaa}" .. slot_labels[slot])
+        slot_label:EnableHitTest(false)
+        local border = frame:CreateOrGetControl("picture", "slot_border_" .. slot, sx - 3, 150, 66, 66)
         AUTO_CAST(border)
         border:SetImage("cupole_grade_frame_R")
         border:SetEnableStretch(1)
         border:EnableHitTest(0)
-        local pic = frame:CreateOrGetControl("picture", "slot_" .. slot, sx, 163, 60, 60)
+        local pic = frame:CreateOrGetControl("picture", "slot_" .. slot, sx, 153, 60, 60)
         AUTO_CAST(pic)
         pic:SetSkinName("inven_slot")
         pic:SetUserValue("SLOT_INDEX", slot)
         pic:SetEventScript(ui.LBUTTONUP, "CM_preset_slot_click")
         pic:SetEventScript(ui.RBUTTONUP, "CM_preset_slot_clear")
-        local slot_label = frame:CreateOrGetControl("richtext", "slot_label_" .. slot, sx, 151, 60, 12)
-        slot_label:SetText("{ol}{s11}{#aaaaaa}" .. slot_labels[slot])
-        slot_label:EnableHitTest(false)
-        local slot_name = frame:CreateOrGetControl("richtext", "slot_name_" .. slot, sx, 231, 60, 20)
+        local slot_name = frame:CreateOrGetControl("richtext", "slot_name_" .. slot, sx, 218, 60, 20)
+        AUTO_CAST(slot_name)
         slot_name:SetText("{ol}{s12}{#999999}Empty")
         slot_name:EnableHitTest(false)
     end
 
-    local selected_mark = frame:CreateOrGetControl("richtext", "selected_mark", 20, 252, 200, 20)
+    local selected_mark = frame:CreateOrGetControl("richtext", "selected_mark", CM_PPAD, 274, 300, 16)
+    AUTO_CAST(selected_mark)
     selected_mark:SetText("")
     selected_mark:EnableHitTest(false)
 
-    local apply_btn = frame:CreateOrGetControl("button", "apply_btn", 20, 275, 70, 35)
-    AUTO_CAST(apply_btn)
-    apply_btn:SetText("{ol}{s14}Apply")
-    apply_btn:SetOverSound("button_over")
-    apply_btn:SetClickSound("button_click_stats")
-    apply_btn:SetEventScript(ui.LBUTTONUP, "CM_preset_apply")
+    -- 버튼은 오른쪽 정렬 + 간격 동일. 폭이 제각각이라 절대좌표로 두면 간격이 들쭉날쭉해 보인다
+    -- right-aligned with one shared gap: with mixed widths, hard-coded x values look uneven
+    -- 버튼 4개를 이름칸 바로 아래, 오른쪽 절반 폭에 딱 맞게 편다.
+    -- 남는 자리를 간격으로 나눠 쓰므로 폭을 바꿔도 양끝이 이름칸과 정렬된 채로 유지된다
+    -- the four buttons sit right under the name field and span exactly the right half:
+    -- leftover space becomes the gap, so both ends stay flush with the name box
+    -- 버튼은 두 무리로 나뉜다: 프리셋을 '쓰는' 쪽은 슬롯 열 오른쪽 끝에, '고치는' 쪽은
+    -- 이름 열 오른쪽 끝에 맞춘다. 아래끝은 왼쪽 슬롯 이름 줄과 같은 선(238)
+    -- two groups: the "use it" pair aligns to the right edge of the slots column, the
+    -- "edit it" pair to the right edge of the name column; both bottoms land on 238
+    local btn_gap = 8
+    local btn_groups = {
+        {right = CM_PPAD + CM_PHALF_W, items = {
+            {name = "apply_btn", w = 42, text = "{ol}{s12}Use", scp = "CM_preset_apply"},
+            {name = "load_btn", w = 88, text = "{ol}{s12}Load Current", scp = "CM_preset_load_current"}
+        }},
+        {right = CM_PRIGHT_X + CM_PHALF_W, items = {
+            {name = "save_btn", w = 42, text = CM_PRESET_SAVE_TEXT, scp = "CM_preset_save"},
+            {name = "delete_btn", w = 42, text = "{ol}{s12}{#ff6666}Del", scp = "CM_preset_delete"}
+        }}
+    }
+    for gi = 1, #btn_groups do
+        local group = btn_groups[gi]
+        local total = (#group.items - 1) * btn_gap
+        for i = 1, #group.items do
+            total = total + group.items[i].w
+        end
+        local bx = group.right - total
+        for i = 1, #group.items do
+            local item = group.items[i]
+            local btn = frame:CreateOrGetControl("button", item.name, bx, 246, item.w, 26)
+            AUTO_CAST(btn)
+            btn:SetText(item.text)
+            btn:SetOverSound("button_over")
+            btn:SetClickSound("button_click_stats")
+            btn:SetEventScript(ui.LBUTTONUP, item.scp)
+            bx = bx + item.w + btn_gap
+        end
+    end
 
-    local load_btn = frame:CreateOrGetControl("button", "load_btn", 100, 275, 110, 35)
-    AUTO_CAST(load_btn)
-    load_btn:SetText("{ol}{s14}Load Current")
-    load_btn:SetOverSound("button_over")
-    load_btn:SetClickSound("button_click_stats")
-    load_btn:SetEventScript(ui.LBUTTONUP, "CM_preset_load_current")
+    -- 위쪽(슬롯·이름) 영역과 아래 보유 목록을 가르는 구분선
+    -- divides the slots/name area above from the owned list below
+    local split_line = frame:CreateOrGetControl("labelline", "sec_split_line", CM_PPAD, 292, CM_PINNER, 3)
+    AUTO_CAST(split_line)
+    split_line:SetSkinName("labelline2")
 
-    local save_btn = frame:CreateOrGetControl("button", "save_btn", 220, 275, 60, 35)
-    AUTO_CAST(save_btn)
-    save_btn:SetText("{ol}{s14}Save")
-    save_btn:SetOverSound("button_over")
-    save_btn:SetClickSound("button_click_stats")
-    save_btn:SetEventScript(ui.LBUTTONUP, "CM_preset_save")
+    CM_preset_section(frame, "sec_grid", CM_PPAD, 296, CM_PINNER, "OWNED CUPOLES")
 
-    local delete_btn = frame:CreateOrGetControl("button", "delete_btn", 290, 275, 65, 35)
-    AUTO_CAST(delete_btn)
-    delete_btn:SetText("{ol}{s14}{#ff6666}Delete")
-    delete_btn:SetOverSound("button_over")
-    delete_btn:SetClickSound("button_click_stats")
-    delete_btn:SetEventScript(ui.LBUTTONUP, "CM_preset_delete")
-
-    local grid_label = frame:CreateOrGetControl("richtext", "grid_label", 20, 318, 200, 20)
-    grid_label:SetText("{ol}{s14}Owned Cupoles:")
-    grid_label:EnableHitTest(false)
-
+    -- 등급 필터도 같은 간격으로 오른쪽 정렬해 머리글 줄에 붙인다
+    -- the grade filters share the header row, right-aligned with one gap
     local filter_grades = {"All", "UR", "SR", "R"}
+    local filter_w, filter_gap = 50, 6
+    local fx = CM_PW - CM_PPAD - (#filter_grades * filter_w + (#filter_grades - 1) * filter_gap)
     for fi, grade in ipairs(filter_grades) do
-        local fx = 150 + (fi - 1) * 55
-        local fbtn = frame:CreateOrGetControl("button", "filter_" .. grade, fx, 315, 50, 22)
+        local fbtn = frame:CreateOrGetControl("button", "filter_" .. grade, fx, 294, filter_w, 22)
         AUTO_CAST(fbtn)
         local grade_colors = {All = "ffffff", UR = "ffcc33", SR = "cc66ff", R = "66ccff"}
         fbtn:SetText("{ol}{s12}{#" .. grade_colors[grade] .. "}" .. grade)
@@ -527,15 +754,22 @@ function CM_preset_frame_open()
         fbtn:SetEventScript(ui.LBUTTONUP, "CM_preset_filter_click")
         fbtn:SetOverSound("button_over")
         fbtn:SetClickSound("button_click_stats")
+        fx = fx + filter_w + filter_gap
     end
 
-    local grid = frame:CreateOrGetControl("groupbox", "cupole_grid", 520, 155, ui.LEFT, ui.TOP, 20, 340, 0, 0)
+    -- 보유 쿠폴 목록은 테두리가 있어야 영역이 구분된다. downbox 가 클라의 "움푹한 영역" 스킨
+    -- the owned list needs a visible edge; downbox is the client's inset-area skin
+    local grid = frame:CreateOrGetControl("groupbox", "cupole_grid", CM_PINNER, 155, ui.LEFT, ui.TOP, CM_PPAD, 322, 0,
+        0)
     AUTO_CAST(grid)
-    grid:SetSkinName("test_frame_midle")
+    grid:SetSkinName("downbox")
     grid:EnableScrollBar(1)
     grid:EnableHittestGroupBox(true)
 
     g.cupole_preset_filter_grade = "All"
+
+    -- 장식용이므로 실패해도 창은 열려야 한다 / decorative: must never take the window down
+    pcall(CM_credit_render, frame, CM_PW, 482)
 
     local esc_timer = frame:CreateOrGetControl("timer", "preset_esc_timer", 0, 0)
     AUTO_CAST(esc_timer)
@@ -545,6 +779,17 @@ function CM_preset_frame_open()
     g.cupole_preset_selected_slot = nil
     frame:ShowWindow(1)
     CM_preset_tab_change(frame)
+end
+
+-- 톱니를 다시 누르면 닫힌다(잘못 눌렀을 때 되돌리기)
+-- pressing the gear again closes it, so a mis-click is easy to undo
+function CM_preset_frame_toggle()
+    local frame = ui.GetFrame(addonNameLower .. "_preset")
+    if frame and frame:IsVisible() == 1 then
+        CM_preset_frame_close()
+        return
+    end
+    CM_preset_frame_open()
 end
 
 function CM_preset_frame_close()
@@ -584,7 +829,7 @@ function CM_preset_tab_change(frame)
     CM_preset_render_grid(frame)
     local save_btn = GET_CHILD(frame, "save_btn")
     AUTO_CAST(save_btn)
-    save_btn:SetText("{ol}{s14}Save")
+    save_btn:SetText(CM_PRESET_SAVE_TEXT)
 end
 
 function CM_preset_render_slots(frame, tab_idx)
@@ -671,6 +916,7 @@ function CM_preset_render_grid(frame)
             grade_color = "66ccff"
         end
         name_rt:SetText("{ol}{s10}{#" .. grade_color .. "}" .. cupole.name)
+        name_rt:SetTextAlign("center", "center")   -- 아이콘 아래 이름 가운데 정렬 / centered under the icon
         name_rt:EnableHitTest(0)
     end
     grid:SetScrollPos(0)
@@ -715,9 +961,6 @@ function CM_preset_slot_clear(parent, ctrl)
     if preset and preset[tostring(slot_index)] then
         preset[tostring(slot_index)] = nil
         CM_preset_render_slots(frame, tab_index)
-        local save_btn = GET_CHILD(frame, "save_btn")
-        AUTO_CAST(save_btn)
-        save_btn:SetText("{ol}{s14}{#ff3333}Save")
     end
 end
 
@@ -777,15 +1020,12 @@ function CM_preset_grid_click(parent, ctrl)
     selected_mark:SetText("")
     CM_preset_update_slot_borders(frame)
     CM_preset_render_slots(frame, tab_index)
-    local save_btn = GET_CHILD(frame, "save_btn")
-    AUTO_CAST(save_btn)
-    save_btn:SetText("{ol}{s14}{#ff3333}Save")
 end
 
 function CM_preset_load_current(frame, ctrl)
     local equip_cupole_list = GET_EQUIP_CUPOLE_LIST()
     for i = 1, 3 do
-        if equip_cupole_list[i] == "-1" then
+        if equip_cupole_list[CM_equip_index(i)] == "-1" then
             ui.SysMsg("[Cupole Preset] 3 Cupoles must be equipped to load")
             return
         end
@@ -798,17 +1038,14 @@ function CM_preset_load_current(frame, ctrl)
     end
     local preset = g.cupole_manager_settings.presets[tostring(tab_index)]
     for i = 1, 3 do
-        local cupole_cls = GET_CUPOLE_BY_INDEX_IN_CLASSLIST(equip_cupole_list[i])
+        local cupole_cls = GET_CUPOLE_BY_INDEX_IN_CLASSLIST(equip_cupole_list[CM_equip_index(i)])
         local cupole_class_name = TryGetProp(cupole_cls, "ClassName", "None")
         preset[tostring(i)] = {
-            id = equip_cupole_list[i],
+            id = equip_cupole_list[CM_equip_index(i)],
             name = cupole_class_name
         }
     end
     CM_preset_render_slots(frame, tab_index)
-    local save_btn = GET_CHILD(frame, "save_btn")
-    AUTO_CAST(save_btn)
-    save_btn:SetText("{ol}{s14}{#ff3333}Save")
     ui.SysMsg("[Cupole Preset] Current Cupoles loaded to slots (press Save to keep)")
 end
 
@@ -971,13 +1208,14 @@ end
 local CM_HUD_ICON_W = 51    -- on/off toggle icon (matches tosfighter pvpmodeBtn 51x22)
 local CM_HUD_ICON_H = 22
 local CM_HUD_ICON_MARGIN = 12   -- gap from the right edge (keeps icon off the border)
-local CM_HUD_BTN_W = 120    -- toggle bar width == list panel width below
+local CM_HUD_BTN_W = 152    -- toggle bar width == list panel width below (gear + on/off icon)
+local CM_HUD_GEAR = 24      -- 프리셋 설정창을 여는 톱니 버튼 / gear that opens the preset window
 local CM_HUD_BTN_H = 40
 local CM_HUD_ROW_H = 24
 local CM_HUD_GAP = 3
 local CM_HUD_PAD = 6
-local CM_HUD_ALPHA = 110    -- translucency (tosfighter uses ~50; lower = more see-through)
-local CM_HUD_POS_VER = 3    -- bump to re-apply the default start position on next load
+local CM_HUD_ALPHA = CM_UI_ALPHA    -- translucency (tosfighter uses ~50; lower = more see-through)
+local CM_HUD_POS_VER = 4    -- bump to re-apply the default start position on next load
 
 function CM_hud_get_rows()
     local presets = g.cupole_manager_settings.presets or {}
@@ -1057,7 +1295,7 @@ function CM_hud_create()
     AUTO_CAST(frame)
     frame:RemoveAllChild()
     frame:Resize(CM_HUD_BTN_W, CM_HUD_BTN_H)
-    frame:SetSkinName("bg2")          -- translucent bar background (with SetAlpha)
+    frame:SetSkinName(CM_UI_SKIN)     -- translucent bar background (with SetAlpha)
     frame:SetTitleBarSkin("None")
     frame:SetLayerLevel(90)
     frame:EnableHittestFrame(1)
@@ -1070,9 +1308,24 @@ function CM_hud_create()
 
     -- title label on the LEFT, two lines, vertically centered (tosfighter
     -- style). Hit test OFF so drags on it pass through to the frame.
-    local label = frame:CreateOrGetControl("richtext", "hud_label", CM_HUD_BTN_W - CM_HUD_ICON_W - CM_HUD_ICON_MARGIN - 14, 30, ui.LEFT, ui.CENTER_VERT, 8, 0, 0, 0)
+    local label = frame:CreateOrGetControl("richtext", "hud_label", CM_HUD_BTN_W - CM_HUD_ICON_W -
+        CM_HUD_ICON_MARGIN - CM_HUD_GEAR - 20, 30, ui.LEFT, ui.CENTER_VERT, 8, 0, 0, 0)
     label:SetFontName("white_16_ol")
     label:EnableHitTest(false)
+
+    -- 프리셋 설정창을 여는 톱니 버튼. 노리산 메뉴 항목을 뺐으므로 이게 유일한 진입점이다.
+    -- on/off 아이콘 왼쪽에 두고, 드래그를 먹지 않게 button 이 아니라 picture 로 만든다
+    -- gear that opens the preset window; with the menu entry gone this is the only way in.
+    -- sits left of the on/off icon and is a picture, not a button, so drags still work
+    local gear = frame:CreateOrGetControl("picture", "hud_gear", CM_HUD_GEAR, CM_HUD_GEAR, ui.RIGHT, ui.CENTER_VERT, 0,
+        0, CM_HUD_ICON_MARGIN + CM_HUD_ICON_W + 6, 0)
+    AUTO_CAST(gear)
+    gear:SetImage("config_button_normal")
+    gear:SetEnableStretch(1)
+    gear:EnableHitTest(1)
+    gear:SetTextTooltip(g.lang == "kr" and "{ol}쿠폴 프리셋 설정" or
+                            (g.lang == "Japanese" and "{ol}クポルプリセット設定" or "{ol}Cupole preset settings"))
+    gear:SetEventScript(ui.LBUTTONUP, "CM_preset_frame_toggle")
 
     -- clickable toggle icon on the RIGHT, vertically centered: a PICTURE (not a
     -- button) so it does not capture the mouse and block frame dragging
@@ -1112,7 +1365,7 @@ function CM_hud_panel_render()
     local inner_h = (n == 0) and 22 or (n * (CM_HUD_ROW_H + CM_HUD_GAP) - CM_HUD_GAP)
     local panel_w = CM_HUD_BTN_W                     -- same width as the toggle bar
     local row_w = CM_HUD_BTN_W - CM_HUD_PAD * 2
-    local panel_h = inner_h + CM_HUD_PAD * 2
+    local panel_h = inner_h + CM_HUD_PAD * 2 + CM_CREDIT_H + CM_HUD_GAP
 
     local sh = ui.GetClientInitialHeight()
     local px = hud.x
@@ -1125,7 +1378,7 @@ function CM_hud_panel_render()
     AUTO_CAST(panel)
     panel:RemoveAllChild()
     panel:Resize(panel_w, panel_h)
-    panel:SetSkinName("bg2")          -- translucent window background (with SetAlpha)
+    panel:SetSkinName(CM_UI_SKIN)     -- translucent window background (with SetAlpha)
     panel:SetTitleBarSkin("None")
     panel:SetLayerLevel(90)
     panel:EnableHittestFrame(1)
@@ -1150,6 +1403,10 @@ function CM_hud_panel_render()
             rb:SetClickSound("button_click_stats")
         end
     end
+
+    -- 프리셋 창과 같은 제작자 표기. 장식이므로 실패해도 패널은 떠야 한다
+    -- same credit as the preset window; decorative, so it must never break the panel
+    pcall(CM_credit_render, panel, panel_w, panel_h - CM_HUD_PAD - CM_CREDIT_H, CM_HUD_PAD)
 
     panel:ShowWindow(1)
 end
