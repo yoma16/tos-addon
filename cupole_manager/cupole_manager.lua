@@ -162,6 +162,19 @@ local function CM_equip_index(preset_index)
     return CM_SLOT_REMAP[preset_index - 1] + 1
 end
 
+-- ⚠️ 화면 크기 API 는 두 종류이고 좌표계가 다르다.
+--   ui.GetClientInitialWidth/Height  = UI 좌표계 (프레임 배치용). SetPos/SetMargin 은 이 값 기준.
+--   option.GetClientWidth/Height     = 실제 화면 픽셀. movie.PlayUIEffect 같은 화면 좌표용.
+-- 프레임을 화면 중앙에 놓을 땐 반드시 앞의 것을 쓴다(클라 선례: quickslotnexpbar.lua:1695).
+-- option 쪽으로 바꿨다가 일반 모니터에서 창이 우하단으로 밀리는 회귀를 냈다(2026-08-16).
+-- two different APIs with different coordinate spaces:
+--   ui.GetClientInitialWidth/Height = UI space, what SetPos/SetMargin use - use this for frames
+--   option.GetClientWidth/Height    = real screen pixels, for things like movie.PlayUIEffect
+-- switching to option once pushed the window to the bottom-right on a normal monitor
+local function CM_screen_size()
+    return ui.GetClientInitialWidth(), ui.GetClientInitialHeight()
+end
+
 -- ============================================================
 -- Init
 -- ============================================================
@@ -1226,21 +1239,6 @@ function CM_hud_get_rows()
         end
     end
     return rows
-end
-
--- 화면 크기는 option.GetClientWidth/Height 로 얻는다. ui.GetClientInitialWidth 는 '초기' 값이라
--- 와이드/2K 처럼 실제 해상도가 다르면 어긋나고, 그 값으로 '화면 안으로 당기기' 보정이 잘못 걸려
--- 열려 있는 패널이 바를 따라오지 못했다 (클라도 같은 용도로 option 쪽을 쓴다: indunenter.lua:2128)
--- use option.GetClientWidth/Height for the real resolution; ui.GetClientInitialWidth is the
--- *initial* size, so on a wide/2K screen the clamp that pulls things back on-screen fires
--- wrongly and the open panel stops following the bar (the client clamps with option too)
-local function CM_screen_size()
-    local ok_w, w = pcall(option.GetClientWidth)
-    local ok_h, h = pcall(option.GetClientHeight)
-    if ok_w and ok_h and tonumber(w) and tonumber(h) and w > 0 and h > 0 then
-        return w, h
-    end
-    return ui.GetClientInitialWidth(), ui.GetClientInitialHeight()
 end
 
 -- far-right edge, vertically centered (tosfighter-style)
