@@ -44,12 +44,13 @@
 -- 1.0.6 "OCSL: prune characters by the barrack roster instead of system_option pc_id (pc_id wiped valid chars on every city entry, leaving only the current char); auto-register current-layer chars"
 -- 1.0.7 "IP: scale the whole panel down to 80% (IP_SCALE) including font sizes (ip_f) and fix the frame position resetting to the default after every redraw (drag save was wired to the inverted move flag)"
 -- 1.0.8 "VE v1.1.0: the weekly-boss checkbox no longer skips the map check entirely (gear used to swap on every non-city map), all on/off toggle, translucent config window. QSO: the joystick quickslot bar no longer disappears after a potion swap -- it is never hidden anymore, and the keyboard bar is shown at alpha 0 so it does not flash"
+-- 1.0.9 "Startup load time cut from 9.2s to 2.2s: market_voucher no longer keeps a duplicate json of its trade log (1,360 entries / 124KB were decoded and re-encoded on every login, 5.2s, even with the addon turned off) - the log txt is now the source of truth and is read only when the voucher window opens. The init throttle also went from 2 addons per 0.1s tick to 6 per 0.05s tick, which cut ~2.2s of pure waiting. AWH: favorite items - new star button left of TAKE SET opens a favorites picker (no count needed), favorites are pinned to the top of the list and get their own tab above All (tab column rescaled to fit 11 tabs). Non-stackable gear is tracked by item guid, so two copies of the same gear with different options register separately. Registering a favorite no longer scrolls the warehouse list back to the top, and all favorite strings now have Korean text"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.0.8"
+local ver = "1.0.9"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -221,7 +222,29 @@ function g.load_lua(path)
     return nil
 end
 
+-- 이 팀으로 접속하면 애드온 설정을 일절 쓰지 않는다. 저장은 빈 값으로만 하고, 읽기는 항상 없는 것으로 취급해서
+-- 매번 기본값으로 시작한다(저장만 막으면 이미 저장돼 있던 설정이 계속 로드되므로 둘 다 막아야 한다)
+-- teams that never use addon settings: writes go out empty and reads always report "missing", so every
+-- login starts from defaults (blocking writes alone would still load whatever was saved before)
+local no_save_teams = {
+    ["유니우스"] = true,
+    ["파비우스"] = true,
+    ["이그너스"] = true
+}
+
+function g.is_no_save_team()
+    -- 로그인 전에는 팀명을 못 얻을 수 있다. 실패하면 평소대로 동작시킨다 / fall back to normal behaviour
+    local ok, team_name = pcall(GETMYFAMILYNAME)
+    if not ok or type(team_name) ~= "string" then
+        return false
+    end
+    return no_save_teams[team_name] == true
+end
+
 function g.load_json(path)
+    if g.is_no_save_team() then
+        return nil, "no_save_team"
+    end
     local file = io.open(path, "r")
     if not file then
         local tmp_file = io.open(path .. ".tmp", "r")
@@ -265,6 +288,9 @@ function g.load_json(path)
 end
 
 function g.save_json(path, tbl)
+    if g.is_no_save_team() then
+        tbl = {}
+    end
     local success, str = pcall(json.encode, tbl)
     if not success then
         print(string.format("[g.save_json] JSON Encode Error in '%s': %s", tostring(path), tostring(str)))
@@ -1145,7 +1171,7 @@ function _nexus_addons_init_addons(is_toggle, toggled_addon_name, _nexus_addons)
     end
     if not g.loaded then
         _nexus_addons:SetUserValue("FUNC_INDEX", 1)
-        _nexus_addons:RunUpdateScript("_nexus_addons_async_safe_call", 0.1)
+        _nexus_addons:RunUpdateScript("_nexus_addons_async_safe_call", 0.05)
         return
     else
         for _, entry in ipairs(g._nexus_addons) do
@@ -1171,9 +1197,13 @@ end
 
 function _nexus_addons_async_safe_call(_nexus_addons)
     local start_time = imcTime.GetAppTimeMS()
-    local time_limit = 6
+    -- 48개를 2개씩 0.1초 간격으로 돌면 실제 작업량과 무관하게 대기만 2.4초 이상 쌓인다.
+    -- 틱당 처리량과 예산을 올려 대기를 줄인다(무거운 애드온 하나는 어차피 한 틱을 통째로 쓴다)
+    -- 2 per tick at 0.1s spent 2.4s+ purely waiting regardless of the real work; raise the batch
+    -- and the budget instead (a single heavy addon still takes a whole tick either way)
+    local time_limit = 30
     local process_count = 0
-    local max_process_per_frame = 2
+    local max_process_per_frame = 6
     while true do
         local func_index = _nexus_addons:GetUserIValue("FUNC_INDEX")
         local entry = g._nexus_addons[func_index]
@@ -1379,6 +1409,12 @@ function _nexus_addons_toggle_addons(list_gb, use_toggle, child_addon_name, num)
 end
 
 function _nexus_addons_GAME_START(_nexus_addons, msg)
+    -- 설정을 저장하지 않는 팀이면 한 번 알린다. 팀명이 한 글자라도 다르면 조용히 작동하지 않으므로 확인용
+    -- tell the user once when this team skips settings; a single mismatched character would fail silently
+    if g.is_no_save_team() then
+        ts(string.format("[Nexus Addons] '%s' team: settings are neither loaded nor saved.",
+            tostring(GETMYFAMILYNAME())))
+    end
     -- if not g.settings then
     _nexus_addons_load_settings()
     -- end
@@ -9607,7 +9643,7 @@ function Another_warehouse_load_settings()
     g.another_warehouse_old_path = string.format("../addons/%s/%s/settings.json", "another_warehouse", g.active_id)
     local settings = g.load_lua(g.another_warehouse_path)
     local need_save = false
-    local ver = 1.1 -- ■ バージョン定義
+    local ver = 1.3 -- ■ バージョン定義
     if not settings then
         settings = g.load_json(json_path)
         if settings then
@@ -9639,6 +9675,7 @@ function Another_warehouse_load_settings()
                 },
                 take_list = new_take_set,
                 items = old_settings.items or {},
+                favorites = {},
                 ver = ver
             }
         else
@@ -9658,6 +9695,7 @@ function Another_warehouse_load_settings()
                 },
                 take_list = new_take_set,
                 items = {},
+                favorites = {},
                 ver = ver
             }
         end
@@ -9673,6 +9711,20 @@ function Another_warehouse_load_settings()
                 name = "Take Items " .. next_num,
                 items = {}
             })
+        end
+        -- 즐겨찾기 목록(계정 공통) / favorite item list (account-wide)
+        if not settings.favorites then
+            settings.favorites = {}
+        end
+        -- ver 1.2는 clsid 숫자만 저장했다 → {clsid, iesid} 형태로 변환
+        -- ver 1.2 stored a bare clsid number; convert it to the {clsid, iesid} form
+        for key, data in pairs(settings.favorites) do
+            if type(data) ~= "table" then
+                settings.favorites[key] = {
+                    clsid = tonumber(data),
+                    iesid = ""
+                }
+            end
         end
         settings.ver = ver
         need_save = true
@@ -9833,6 +9885,7 @@ function Another_warehouse_ACCOUNTWAREHOUSE_CLOSE()
     monstercardslot:SetLayerLevel(96)
     ui.DestroyFrame(addon_name_lower .. "awh")
     ui.DestroyFrame(addon_name_lower .. "awh_setting")
+    ui.DestroyFrame(addon_name_lower .. "awh_favorite")
     if g.settings.another_warehouse.use == 0 then
         return
     end
@@ -9875,6 +9928,7 @@ function Another_warehouse_frame_close(parent, ctrl)
     DESTROY_CHILD_BYNAME(gbox, "awh_help")
     DESTROY_CHILD_BYNAME(gbox, "awh_leave")
     DESTROY_CHILD_BYNAME(gbox, "awh_display_change")
+    DESTROY_CHILD_BYNAME(gbox, "awh_favorite")
     DESTROY_CHILD_BYNAME(gbox, "awh_take")
     DESTROY_CHILD_BYNAME(gbox, "awh_count_text")
     DESTROY_CHILD_BYNAME(gbox, "awh_close")
@@ -9954,6 +10008,15 @@ function Another_warehouse_OPEN_DLG_ACCOUNTWAREHOUSE()
                              "{ol}Check to switch display"
     display_change:SetTextTooltip(tooltip_text)
     display_change:ShowWindow(1)
+    local favorite = gbox:CreateOrGetControl("button", "awh_favorite", 10, 0, 40, 43)
+    AUTO_CAST(favorite)
+    favorite:SetText("{img star_mark 22 22}")
+    favorite:SetEventScript(ui.LBUTTONUP, "Another_warehouse_favorite_setting")
+    favorite:SetMargin(263, 60, 0, 0)
+    favorite:SetSkinName("test_pvp_btn")
+    favorite:SetTextTooltip(g.lang == "Japanese" and "{ol}[AWH]{nl}お気に入り設定" or g.lang == "kr" and
+                                "{ol}[AWH]{nl}즐겨찾기 설정" or
+                                "{ol}[AWH]{nl}Favorite item setup")
     local take = gbox:CreateOrGetControl("button", "awh_take", 10, 0, 100, 43)
     AUTO_CAST(take)
     take:SetText("{@st66b}TAKE SET")
@@ -10128,10 +10191,15 @@ function Another_warehouse_tab_change(awh, ctrl, search_text, index)
         local search_edit = GET_CHILD_RECURSIVELY(accountwarehouse, "awh_search_edit")
         search_edit:SetText("")
     end
-    local tab_tbl = {"inventory_main", "inventory_equip", "inventory_supplies", "inventory_recipe", "inventory_card",
-                     "inventory_material", "inventory_gem", "inventory_premium", "inventory_housing", "alchemy_item_tab"}
+    -- 1번 = 즐겨찾기 탭, 2번 = All / index 1 = favorites tab, index 2 = All
+    -- 탭이 11개라 세로가 안 맞아서 간격 55→50, 높이 60→54로 축소 / 11 tabs no longer fit, so pitch 55→50 and height 60→54
+    -- inventory_quest = 창고에선 안 쓰는 탭 모양 이미지(퀘스트 아이템은 목록에서 제외됨)를 즐겨찾기 탭 배경으로 재사용
+    -- inventory_quest = tab-shaped image unused by the warehouse (quest items are filtered out), reused as the favorites tab
+    local tab_tbl = {"inventory_quest", "inventory_main", "inventory_equip", "inventory_supplies",
+                     "inventory_recipe", "inventory_card", "inventory_material", "inventory_gem", "inventory_premium",
+                     "inventory_housing", "alchemy_item_tab"}
     for i, image in ipairs(tab_tbl) do
-        local tab = awh:CreateOrGetControl("picture", "tab" .. image, 5, (i - 1) * 55, 40, 60)
+        local tab = awh:CreateOrGetControl("picture", "tab" .. image, 5, (i - 1) * 50, 40, 54)
         AUTO_CAST(tab)
         tab:SetClickSound("inven_arrange")
         tab:SetEventScript(ui.LBUTTONDOWN, "Another_warehouse_tab_change")
@@ -10143,11 +10211,27 @@ function Another_warehouse_tab_change(awh, ctrl, search_text, index)
             tab:SetImage(image)
         end
         tab:SetEnableStretch(1)
+        if i == 1 then
+            -- 탭 모양 이미지 위에 별을 겹쳐 즐겨찾기 탭으로 구분 / overlay a star on the tab image to mark it as favorites
+            -- 탭 40x54 / 별 22x22 → 기하학적 중앙은 x=9 이지만 탭 그림 자체가 왼쪽으로 치우쳐 있어 +3 보정.
+            -- 별이 아직 안 맞으면 STAR_X 숫자만 조절하면 된다.
+            -- tab is 40x54 and the star 22x22, so the geometric center is x=9, but the tab art itself
+            -- sits slightly left, hence the +3 nudge. Tweak STAR_X alone if it still looks off.
+            local STAR_X = 12
+            local star = tab:CreateOrGetControl("richtext", "fav_star", STAR_X, 16, 22, 22)
+            AUTO_CAST(star)
+            -- 별이 클릭을 먹어버려서 탭이 안 바뀌던 문제 → 히트테스트를 끄고 아래 탭으로 통과시킨다
+            -- the star used to swallow the click so the tab never changed; disable hittest to pass it through
+            star:EnableHitTest(0)
+            star:SetText("{img star_mark 22 22}")
+            tab:SetTextTooltip(g.lang == "Japanese" and "{ol}お気に入り" or g.lang == "kr" and "{ol}즐겨찾기" or
+                                   "{ol}Favorites")
+        end
     end
     if index == 0 then
-        local tab = GET_CHILD(awh, "tab" .. tab_tbl[1])
-        tab:SetImage(tab_tbl[1] .. "_clicked")
-        awh:SetUserValue("TAB_INDEX", 1)
+        local tab = GET_CHILD(awh, "tab" .. tab_tbl[2])
+        tab:SetImage(tab_tbl[2] .. "_clicked")
+        awh:SetUserValue("TAB_INDEX", 2)
     end
     local gb = GET_CHILD(awh, "gb")
     AUTO_CAST(gb)
@@ -10171,7 +10255,8 @@ function Another_warehouse_frame_update(awh, gb, search_text, index)
     local warehouse_item_list = {}
     local group_counts = {}
     local slotset_counts = {}
-    local tab_filter_map = {nil, {
+    -- 1번(즐겨찾기)과 2번(All)은 그룹 필터 없음 / index 1 (favorites) and 2 (All) have no group filter
+    local tab_filter_map = {nil, nil, {
         ["EquipGroup"] = true
     }, {
         ["NonEquipGroup"] = true,
@@ -10193,6 +10278,13 @@ function Another_warehouse_frame_update(awh, gb, search_text, index)
         ["HiiddenAbility"] = true
     }}
     local current_filter = tab_filter_map[index]
+    -- 즐겨찾기 탭은 즐겨찾기만, 즐겨찾기 그룹은 즐겨찾기 탭과 All 탭에만 표시
+    -- favorites tab shows favorites only; the favorites group is shown on the favorites tab and the All tab
+    local is_fav_tab = (index == 1)
+    local show_fav_group = (index == 0) or (index == 1) or (index == 2)
+    local fav_by_iesid, fav_by_clsid = Another_warehouse_favorite_maps()
+    local fav_item_list = {}
+    local fav_order_of = {} -- iesid → 표시 순서 / iesid → display order
     for i = 0, sorted_guid_list:Count() - 1 do
         local warehouse_item = item_list:GetItemByGuid(sorted_guid_list:Get(i))
         if warehouse_item then
@@ -10203,9 +10295,15 @@ function Another_warehouse_frame_update(awh, gb, search_text, index)
                 if type_str ~= 'Quest' and baseid_cls.ClassName ~= 'Unused' then
                     local make_slot = Another_warehouse_check_search_and_filter(warehouse_item, item_cls, search_text)
                     if make_slot and warehouse_item.count > 0 then
+                        local item_iesid = warehouse_item:GetIESID()
+                        local fav_order = fav_by_iesid[item_iesid] or fav_by_clsid[item_cls.ClassID]
+                        if show_fav_group and fav_order then
+                            fav_order_of[item_iesid] = fav_order
+                            table.insert(fav_item_list, warehouse_item)
+                        end
                         local group_name = baseid_cls.TreeGroup
                         local is_visible = (current_filter == nil) or (current_filter[group_name] == true)
-                        if is_visible then
+                        if is_visible and not is_fav_tab then
                             table.insert(warehouse_item_list, warehouse_item)
                             local group_name = baseid_cls.TreeGroup
                             group_counts[group_name] = (group_counts[group_name] or 0) + 1
@@ -10221,6 +10319,15 @@ function Another_warehouse_frame_update(awh, gb, search_text, index)
             end
         end
     end
+    -- 설정창에서 드래그로 정한 슬롯 순서대로 표시 / display in the slot order set by dragging in the settings frame
+    table.sort(fav_item_list, function(a, b)
+        local order_a = fav_order_of[a:GetIESID()] or 0
+        local order_b = fav_order_of[b:GetIESID()] or 0
+        if order_a ~= order_b then
+            return order_a < order_b
+        end
+        return Another_warehouse_INVENTORY_SORT_BY_NAME(a, b)
+    end)
     --[[local fix_sort_addon = _G["ADDONS"]["weizlogy"]["fixinventorysort"]
 
     if fix_sort_addon and type(fix_sort_addon) == "function" then
@@ -10241,6 +10348,40 @@ function Another_warehouse_frame_update(awh, gb, search_text, index)
         if cls.TreeGroup ~= "None" then
             group_caption_map[cls.TreeGroup] = cls.TreeGroupCaption
         end
+    end
+    -- 즐겨찾기 그룹을 제일 먼저 Add해서 트리 최상단에 고정 / add the favorites group first so it stays at the top of the tree
+    if #fav_item_list > 0 then
+        local caption = g.lang == "Japanese" and "お気に入り" or g.lang == "kr" and "즐겨찾기" or "Favorites"
+        local fav_group = tree:Add(string.format("%s (%d)", caption, #fav_item_list), "awh_favorite_group")
+        local fav_slotset_name = "sset_awh_favorite"
+        local fav_slotset = Another_warehouse_make_inven_slotset(tree, fav_slotset_name)
+        tree:Add(fav_group, fav_slotset, fav_slotset_name)
+        created_slotsets[fav_slotset_name] = fav_slotset
+        for _, inv_item in ipairs(fav_item_list) do
+            local item_cls = GetIES(inv_item:GetObject())
+            local baseid_cls = INV_GET_INVEN_BASEIDCLS_BY_ITEMGUID(inv_item:GetIESID())
+            local slot_count = fav_slotset:GetSlotCount()
+            local count = fav_slotset:GetUserIValue("SLOT_ITEM_COUNT")
+            while slot_count <= count do
+                fav_slotset:ExpandRow()
+                slot_count = fav_slotset:GetSlotCount()
+            end
+            local slot = fav_slotset:GetSlotByIndex(count)
+            fav_slotset:SetUserValue("SLOT_ITEM_COUNT", count + 1)
+            slot:ShowWindow(1)
+            Another_warehouse_insert_item_to_tree(gb, tree, slot, inv_item, item_cls, fav_slotset_name, baseid_cls)
+        end
+        local fav_margin = tree:CreateOrGetControl('richtext', 'margin_awh_favorite', 0, 0, 400, 10)
+        AUTO_CAST(fav_margin)
+        fav_margin:EnableResizeByText(0)
+        fav_margin:SetText("")
+        tree:Add(fav_group, fav_margin, 'margin_awh_favorite')
+    elseif is_fav_tab then
+        -- 즐겨찾기 탭이 비어 있으면 등록 방법을 안내 / tell the user how to register when the favorites tab is empty
+        local msg = g.lang == "Japanese" and "{img star_mark 20 20}ボタンからお気に入りを登録してください" or
+                        g.lang == "kr" and "{img star_mark 20 20}버튼에서 즐겨찾기를 등록하세요" or
+                        "Register favorites from the {img star_mark 20 20}button"
+        tree:Add(msg, "awh_favorite_empty")
     end
     for _, group_name in ipairs(group_order) do
         local count = group_counts[group_name]
@@ -10647,7 +10788,7 @@ function Another_warehouse_search(frame, ctrl, str, num)
     AUTO_CAST(gb)
     local search_text = ctrl:GetText()
     local tab = GET_CHILD(awh, "tab" .. "inventory_main")
-    Another_warehouse_tab_change(awh, tab, search_text, 1)
+    Another_warehouse_tab_change(awh, tab, search_text, 2) -- 2 = All 탭 / index 2 = All tab
 end
 
 function Another_warehouse_inv_lbtn(frame, inv_item, dumm)
@@ -10676,6 +10817,11 @@ function Another_warehouse_inv_rbtn(item_obj, slot)
     local iesid = icon_info:GetIESID()
     local inv_item = GET_PC_ITEM_BY_GUID(iesid)
     if not inv_item then
+        return
+    end
+    local awh_favorite = ui.GetFrame(addon_name_lower .. "awh_favorite")
+    if awh_favorite and awh_favorite:IsVisible() == 1 then
+        Another_warehouse_favorite_add(GetIES(inv_item:GetObject()).ClassID, iesid)
         return
     end
     -- ui.AlarmMsg(TryGetProp(GetIES(inv_item:GetObject()), 'BelongingCount', 0))
@@ -10812,6 +10958,15 @@ function Another_warehouse_on_rbutton(frame, slot, iesid, argnum)
             SET_SLOT_ITEM_CLS(ctrl, item_cls)
             Another_warehouse_save_settings()
         end
+        return
+    end
+    local awh_favorite = ui.GetFrame(addon_name_lower .. "awh_favorite")
+    if awh_favorite and awh_favorite:IsVisible() == 1 then
+        local inv_item = session.GetEtcItemByGuid(IT_ACCOUNT_WAREHOUSE, iesid)
+        if not inv_item then
+            return
+        end
+        Another_warehouse_favorite_add(GetIES(inv_item:GetObject()).ClassID, iesid)
         return
     end
     local awh_set_items = ui.GetFrame(addon_name_lower .. "awh_set_items")
@@ -11840,6 +11995,266 @@ function Another_warehouse_set_item_take(name)
     Another_warehouse_frame_update(awh, gb, "", index)
 end
 
+-- 저장된 즐겨찾기 항목에서 clsid/iesid를 꺼낸다. ver 1.2 이하 구형(clsid 숫자만)도 읽는다
+-- read clsid/iesid out of a stored favorite entry; also handles the pre-1.3 bare-clsid form
+function Another_warehouse_favorite_entry(data)
+    if type(data) == "table" then
+        return tonumber(data.clsid), data.iesid or ""
+    end
+    return tonumber(data), ""
+end
+
+-- 즐겨찾기 매칭 맵 2개(iesid용, clsid용) → 값은 트리 표시 순서(= 슬롯 번호)
+-- two favorite lookup maps (by iesid, by clsid); the value is the tree display order (= slot index)
+--
+-- 장비처럼 스택 안 되는 아이템은 옵션이 달라도 clsid가 같으므로 iesid(고유 번호)로 구분해야 한다.
+-- 반대로 스택 아이템은 병합/분할로 iesid가 바뀌므로 clsid로 매칭한다.
+-- Non-stackable gear shares a clsid even when the options differ, so it must be matched by iesid.
+-- Stackable items change iesid when stacks merge/split, so they are matched by clsid instead.
+function Another_warehouse_favorite_maps()
+    local by_iesid = {}
+    local by_clsid = {}
+    local favorites = g.awh_settings and g.awh_settings.favorites
+    if not favorites then
+        return by_iesid, by_clsid
+    end
+    for index_str, data in pairs(favorites) do
+        local order = tonumber(index_str) or 0
+        local cls_id, iesid = Another_warehouse_favorite_entry(data)
+        if cls_id then
+            if iesid ~= "" and geItemTable.IsStack(cls_id) == 0 then
+                if by_iesid[iesid] == nil or order < by_iesid[iesid] then
+                    by_iesid[iesid] = order
+                end
+            else
+                if by_clsid[cls_id] == nil or order < by_clsid[cls_id] then
+                    by_clsid[cls_id] = order
+                end
+            end
+        end
+    end
+    return by_iesid, by_clsid
+end
+
+function Another_warehouse_favorite_setting()
+    if not g.awh_settings.favorites then
+        g.awh_settings.favorites = {}
+    end
+    local fav_frame = ui.CreateNewFrame("notice_on_pc", addon_name_lower .. "awh_favorite", 0, 0, 0, 0)
+    AUTO_CAST(fav_frame)
+    fav_frame:SetSkinName("test_frame_low")
+    fav_frame:SetPos(680, 170)
+    fav_frame:SetLayerLevel(100)
+    fav_frame:Resize(320, 608)
+    fav_frame:RemoveAllChild()
+    local close = fav_frame:CreateOrGetControl("button", "close", 0, 0, 25, 25)
+    AUTO_CAST(close)
+    close:SetImage("testclose_button")
+    close:SetGravity(ui.RIGHT, ui.TOP)
+    close:SetEventScript(ui.LBUTTONUP, "Another_warehouse_favorite_close")
+    local title_text = fav_frame:CreateOrGetControl("richtext", "title_text", 15, 15, 250, 30)
+    AUTO_CAST(title_text)
+    title_text:SetText("{ol}{s18}{img star_mark 20 20} " ..
+                           (g.lang == "Japanese" and "お気に入り" or g.lang == "kr" and "즐겨찾기" or "Favorites"))
+    local set_gb = fav_frame:CreateOrGetControl("groupbox", "set_gb", 10, 50, 380, 380)
+    AUTO_CAST(set_gb)
+    set_gb:SetSkinName("test_frame_midle_light")
+    set_gb:Resize(300, 500)
+    fav_frame:ShowWindow(1)
+    local fav_slotset = set_gb:CreateOrGetControl('slotset', 'fav_slotset', 0, 0, 0, 0)
+    AUTO_CAST(fav_slotset)
+    fav_slotset:SetSlotSize(50, 50)
+    fav_slotset:EnablePop(1)
+    fav_slotset:EnableDrag(1)
+    fav_slotset:EnableDrop(1)
+    fav_slotset:SetEventScript(ui.DROP, "Another_warehouse_favorite_swap_item")
+    fav_slotset:SetColRow(6, 10)
+    fav_slotset:SetSpc(0, 0)
+    fav_slotset:SetSkinName('slot')
+    fav_slotset:CreateSlots()
+    local favorites = g.awh_settings.favorites
+    local slotcount = fav_slotset:GetSlotCount()
+    for i = 1, slotcount do
+        local slot = GET_CHILD(fav_slotset, "slot" .. i)
+        AUTO_CAST(slot)
+        local saved = favorites[tostring(i)]
+        if saved then
+            local cls_id, iesid = Another_warehouse_favorite_entry(saved)
+            local item_cls = cls_id and GetClassByType("Item", cls_id)
+            if item_cls then
+                SET_SLOT_ITEM_CLS(slot, item_cls)
+                if iesid ~= "" then
+                    SET_SLOT_IESID(slot, iesid)
+                    -- 옵션이 다른 동일 아이템을 구분할 수 있게 실제 아이템 툴팁을 붙인다 (CCH와 동일 방식)
+                    -- attach the real item tooltip so items sharing a clsid can be told apart (same as CCH)
+                    local icon = slot:GetIcon()
+                    if not icon then
+                        icon = CreateIcon(slot)
+                    end
+                    if icon then
+                        icon:SetTooltipType("wholeitem")
+                        icon:SetTooltipArg("None", cls_id, iesid)
+                    end
+                end
+                slot:SetEventScript(ui.RBUTTONUP, "Another_warehouse_favorite_clear_item")
+            end
+        else
+            slot:SetTextTooltip(g.lang == "Japanese" and
+                                    "{ol}倉庫/インベントリのアイテムを右クリックで登録" or g.lang == "kr" and
+                                    "{ol}창고/인벤토리 아이템을 우클릭으로 등록" or
+                                    "{ol}Right-click a warehouse/inventory item to register")
+        end
+    end
+    local init = fav_frame:CreateOrGetControl("button", "init", 0, 0, 100, 43)
+    AUTO_CAST(init)
+    init:SetText(g.lang == "Japanese" and "{@st66b}初期化" or g.lang == "kr" and "{@st66b}초기화" or
+                     "{@st66b}Initialize")
+    init:SetMargin(210, 555, 0, 0)
+    init:SetSkinName("test_pvp_btn")
+    init:SetEventScript(ui.LBUTTONUP, "Another_warehouse_favorite_init")
+    local help = fav_frame:CreateOrGetControl('button', "fav_help", 0, 0, 30, 30)
+    AUTO_CAST(help)
+    help:SetText("{ol}{img question_mark 20 20}")
+    help:SetMargin(15, 562, 0, 0)
+    help:SetSkinName("test_pvp_btn")
+    help:SetEventScript(ui.LBUTTONUP, "Another_warehouse_favorite_help")
+end
+
+function Another_warehouse_favorite_close()
+    ui.DestroyFrame(addon_name_lower .. "awh_favorite")
+end
+
+function Another_warehouse_favorite_help()
+    local context = ui.CreateContextMenu("awh_favorite_help_context", "{ol}[AWH] FAVORITES", 30, 0, 100, 100)
+    local msg = g.lang == "Japanese" and "この画面を開いている間に倉庫アイテムを右クリックで登録" or g.lang == "kr" and
+                    "이 창이 열려 있는 동안 창고 아이템을 우클릭하면 등록됩니다" or
+                    "While this frame is open, right-click a warehouse item to register it"
+    ui.AddContextMenuItem(context, "{ol}" .. msg, "None")
+    msg = g.lang == "Japanese" and "この画面を開いている間にインベントリアイテムを右クリックで登録" or g.lang == "kr" and
+              "이 창이 열려 있는 동안 인벤토리 아이템을 우클릭하면 등록됩니다" or
+              "While this frame is open, right-click an inventory item to register it"
+    ui.AddContextMenuItem(context, "{ol}" .. msg, "None")
+    msg = g.lang == "Japanese" and "設定スロット:右クリックで登録解除" or g.lang == "kr" and
+              "설정 슬롯: 우클릭으로 등록 해제" or "Setting slot: right-click to unregister"
+    ui.AddContextMenuItem(context, "{ol}" .. msg, "None")
+    msg = g.lang == "Japanese" and "設定スロット:ドラッグで並び順を変更" or g.lang == "kr" and
+              "설정 슬롯: 드래그로 표시 순서 변경" or "Setting slot: drag to change the display order"
+    ui.AddContextMenuItem(context, "{ol}" .. msg, "None")
+    msg = g.lang == "Japanese" and "同じ装備でもオプションが違えば別々に登録されます" or g.lang == "kr" and
+              "같은 장비라도 옵션이 다르면 각각 따로 등록됩니다" or
+              "Gear sharing the same name registers separately when the options differ"
+    ui.AddContextMenuItem(context, "{ol}" .. msg, "None")
+    ui.OpenContextMenu(context)
+end
+
+function Another_warehouse_favorite_add(cls_id, iesid)
+    local fav_frame = ui.GetFrame(addon_name_lower .. "awh_favorite")
+    if not fav_frame or fav_frame:IsVisible() == 0 then
+        return
+    end
+    if not cls_id or not iesid or iesid == "" then
+        return
+    end
+    local favorites = g.awh_settings.favorites
+    -- 스택 아이템은 clsid로, 장비 등 스택 안 되는 아이템은 iesid로 중복 판정
+    -- (옵션만 다른 같은 장비 2개는 서로 다른 항목으로 등록되어야 한다)
+    -- dedupe stackables by clsid, non-stackables by iesid
+    -- (two copies of the same gear with different options must register as separate entries)
+    local is_stack = geItemTable.IsStack(cls_id) == 1
+    for _, saved in pairs(favorites) do
+        local saved_clsid, saved_iesid = Another_warehouse_favorite_entry(saved)
+        local dup
+        if is_stack then
+            dup = (saved_clsid == cls_id)
+        else
+            dup = (saved_iesid == iesid)
+        end
+        if dup then
+            ui.SysMsg(g.lang == "Japanese" and "既に登録済です" or g.lang == "kr" and "이미 등록되어 있습니다" or
+                          "Already registered")
+            return
+        end
+    end
+    local fav_slotset = GET_CHILD_RECURSIVELY(fav_frame, "fav_slotset")
+    local slotcount = fav_slotset:GetSlotCount()
+    local index = nil
+    for i = 1, slotcount do
+        if favorites[tostring(i)] == nil then
+            index = i
+            break
+        end
+    end
+    if not index then
+        ui.SysMsg(g.lang == "Japanese" and "お気に入りの空きがありません" or g.lang == "kr" and
+                      "즐겨찾기에 빈 슬롯이 없습니다" or "No empty favorite slot")
+        return
+    end
+    favorites[tostring(index)] = {
+        clsid = cls_id,
+        iesid = iesid
+    }
+    Another_warehouse_save_settings()
+    Another_warehouse_favorite_setting()
+    Another_warehouse_favorite_refresh()
+end
+
+function Another_warehouse_favorite_clear_item(frame, ctrl)
+    local slot_index = string.gsub(ctrl:GetName(), "slot", "")
+    g.awh_settings.favorites[slot_index] = nil
+    Another_warehouse_save_settings()
+    Another_warehouse_favorite_setting()
+    Another_warehouse_favorite_refresh()
+end
+
+function Another_warehouse_favorite_swap_item(parent, slot)
+    if parent:GetTopParentFrame():GetName() ~= addon_name_lower .. "awh_favorite" then
+        return
+    end
+    local lift_icon = ui.GetLiftIcon()
+    local from_slot = lift_icon:GetParent()
+    if from_slot:GetParent():GetName() ~= "fav_slotset" then
+        return
+    end
+    local favorites = g.awh_settings.favorites
+    local from_index = string.gsub(from_slot:GetName(), "slot", "")
+    local to_index = string.gsub(slot:GetName(), "slot", "")
+    favorites[from_index], favorites[to_index] = favorites[to_index], favorites[from_index]
+    Another_warehouse_save_settings()
+    Another_warehouse_favorite_setting()
+    Another_warehouse_favorite_refresh()
+end
+
+function Another_warehouse_favorite_init()
+    local msg = g.lang == "Japanese" and "{ol}{#FFFFFF}お気に入りを初期化しますか？" or g.lang == "kr" and
+                    "{ol}{#FFFFFF}즐겨찾기를 초기화하시겠습니까?" or "{ol}{#FFFFFF}Initialize favorites?"
+    ui.MsgBox(msg, "Another_warehouse_favorite_init_ok()", 'None')
+end
+
+function Another_warehouse_favorite_init_ok()
+    g.awh_settings.favorites = {}
+    ui.SysMsg(g.lang == "Japanese" and "{ol}初期化しました" or g.lang == "kr" and "{ol}초기화했습니다" or
+                  "{ol}Initialized")
+    Another_warehouse_save_settings()
+    Another_warehouse_favorite_setting()
+    Another_warehouse_favorite_refresh()
+end
+
+-- 즐겨찾기 변경 후 창고 목록 다시 그리기 / redraw the warehouse list after a favorite change
+function Another_warehouse_favorite_refresh()
+    local awh = ui.GetFrame(addon_name_lower .. "awh")
+    if not awh or awh:IsVisible() == 0 then
+        return
+    end
+    local gb = GET_CHILD(awh, "gb")
+    AUTO_CAST(gb)
+    -- frame_update는 끝에서 SCROLL_POS 값으로 스크롤을 되돌린다. 그 값은 창고 서버 메시지(on_msg)에서만
+    -- 갱신되므로, 즐겨찾기 변경처럼 서버 메시지 없이 다시 그릴 때는 지금 위치를 직접 넣어줘야 맨 위로 튀지 않는다
+    -- frame_update restores SCROLL_POS at the end, and that value is only refreshed in on_msg (server
+    -- messages), so a redraw without one must store the current position or the list jumps to the top
+    awh:SetUserValue("SCROLL_POS", gb:GetScrollCurPos())
+    Another_warehouse_frame_update(awh, gb, "", awh:GetUserIValue("TAB_INDEX"))
+end
+
 function Another_warehouse_help()
     local context = ui.CreateContextMenu("awh_help_context", "{ol}[AWH] HELP", 30, 0, 100, 100)
     local msg = g.lang == "Japanese" and "インベントリ:アイコン右クリックで全数搬入" or
@@ -11866,6 +12281,14 @@ function Another_warehouse_help()
     ui.AddContextMenuItem(context, "{ol}" .. msg, "None")
     msg = g.lang == "Japanese" and "チーム倉庫:左SHIFT+アイコン左クリックで10個搬出" or
               "Warehouse: left SHIFT+mouse left click to Carry out 10 items"
+    ui.AddContextMenuItem(context, "{ol}" .. msg, "None")
+    ui.AddContextMenuItem(context, "----------", "None")
+    msg = g.lang == "Japanese" and "{img star_mark 18 18}ボタン: お気に入り設定" or g.lang == "kr" and
+              "{img star_mark 18 18}버튼: 즐겨찾기 설정" or "{img star_mark 18 18}button: Favorite item setup"
+    ui.AddContextMenuItem(context, "{ol}" .. msg, "None")
+    msg = g.lang == "Japanese" and "お気に入りは一番上のタブとAllタブの最上段に表示されます" or g.lang == "kr" and
+              "즐겨찾기는 맨 위 탭과 All 탭 최상단에 표시됩니다" or
+              "Favorites are shown on the top tab and at the top of the All tab"
     ui.AddContextMenuItem(context, "{ol}" .. msg, "None")
     ui.OpenContextMenu(context)
 end
@@ -26608,41 +27031,71 @@ g.market_voucher_trans = {
         ["buy"] = "Buy"
     }
 }
-function Market_voucher_save_settings()
-    g.save_json(g.market_voucher_path, g.market_voucher_settings)
-end
-
-function Market_voucher_load_settings()
+-- 거래 기록의 정본은 market_voucher_log.txt다. 슬래시 구분 텍스트라 JSON 파싱이 필요 없고,
+-- 추가는 한 줄 append, 읽기는 전표 창을 열 때만 한다. 예전에는 같은 내용을 json에도 중복 저장하며
+-- 로그인마다 전량 decode + 재encode 해서 1,360건 기준 5.1초가 걸렸다
+-- market_voucher_log.txt is the source of truth: append one line per trade, read only when the
+-- voucher window opens. The old code kept a duplicate json and re-encoded all of it on every login
+function Market_voucher_setup_paths()
     g.market_voucher_path = string.format("../addons/%s/%s/market_voucher.json", addon_name_lower, g.active_id)
     g.market_voucher_old_path = string.format("../addons/%s/%s/settings_2507.json", "market_voucher", g.active_id)
     g.market_voucher_log_path = string.format("../addons/%s/%s/market_voucher_log.txt", addon_name_lower, g.active_id)
     g.market_voucher_old_log_path = string.format('../addons/%s/log_2507.txt', "market_voucher")
-    local settings = g.load_json(g.market_voucher_path)
-    if not settings then
-        local old_settings = g.load_json(g.market_voucher_old_path)
-        if old_settings then
-            settings = old_settings
-            local old_log_file = io.open(g.market_voucher_old_log_path, "r")
-            if old_log_file then
-                local content = old_log_file:read("*a")
-                old_log_file:close()
-                local new_log_file = io.open(g.market_voucher_log_path, "w")
-                if new_log_file then
-                    new_log_file:write(content)
-                    new_log_file:close()
-                end
-            end
-        else
-            settings = {}
+end
+
+function Market_voucher_append_log(records)
+    if #records == 0 then
+        return
+    end
+    local file_handle = io.open(g.market_voucher_log_path, "a")
+    if file_handle then
+        file_handle:write(table.concat(records, "\n") .. "\n")
+        file_handle:close()
+    end
+end
+
+function Market_voucher_get_records()
+    local records = {}
+    local file_handle = io.open(g.market_voucher_log_path, "r")
+    if not file_handle then
+        return records
+    end
+    local content = file_handle:read("*a")
+    file_handle:close()
+    if content then
+        for line in string.gmatch(content, "[^\r\n]+") do
+            table.insert(records, line)
         end
     end
-    g.market_voucher_settings = settings
-    Market_voucher_save_settings()
+    return records
+end
+
+-- 로그 txt가 비었을 때만 옛 데이터(구버전 txt, 또는 json 사본)를 옮긴다. 전표 창을 열 때 한 번만 호출된다
+-- fill the log txt from old data (legacy txt, or the json copy) only when it is empty
+function Market_voucher_migrate_log()
+    local old_log_file = io.open(g.market_voucher_old_log_path, "r")
+    if old_log_file then
+        local content = old_log_file:read("*a")
+        old_log_file:close()
+        if content and content ~= "" then
+            local new_log_file = io.open(g.market_voucher_log_path, "w")
+            if new_log_file then
+                new_log_file:write(content)
+                new_log_file:close()
+                return
+            end
+        end
+    end
+    local settings = g.load_json(g.market_voucher_path) or g.load_json(g.market_voucher_old_path)
+    if type(settings) == "table" then
+        Market_voucher_append_log(settings)
+    end
 end
 
 function market_voucher_on_init()
-    if not g.market_voucher_settings then
-        Market_voucher_load_settings()
+    Market_voucher_setup_paths()
+    if g.settings.market_voucher.use == 0 then
+        return
     end
     local old_func = g.settings.market_voucher.old_init_func
     if _G[old_func] then
@@ -26696,18 +27149,7 @@ function Market_voucher_CABINET_GET_ALL_LIST(my_frame, my_msg)
             end
         end
     end
-    for i, result_string in ipairs(results_table) do
-        table.insert(g.market_voucher_settings, result_string)
-    end
-    Market_voucher_save_settings()
-    if #results_table > 0 then
-        local all_results = table.concat(results_table, "\n")
-        local file_handle = io.open(g.market_voucher_log_path, "a")
-        if file_handle then
-            file_handle:write(all_results .. "\n")
-            file_handle:close()
-        end
-    end
+    Market_voucher_append_log(results_table)
     local count = session.market.GetCabinetItemCount()
     AddLuaTimerFuncWithLimitCount("CABINET_GET_ITEM", 200, count * 5)
     local market_cabinet_soldlist = ui.GetFrame("market_cabinet_soldlist")
@@ -26792,13 +27234,7 @@ function Market_voucher__BUY_MARKET_ITEM(my_frame, my_msg)
     end
     local result_string = string.format("%s/%s/%s/%d/%d/%d/%s", formatted_time, my_char_name, sanitized_item_name,
         quantity, unit_price, total_amount, "buy")
-    table.insert(g.market_voucher_settings, result_string)
-    local file_handle = io.open(g.market_voucher_log_path, "a")
-    if file_handle then
-        file_handle:write(result_string .. "\n")
-        file_handle:close()
-    end
-    Market_voucher_save_settings()
+    Market_voucher_append_log({result_string})
     market.ReqBuyItems()
 end
 
@@ -26820,13 +27256,7 @@ function Market_voucher__CABINET_ITEM_BUY(my_frame, my_msg)
     local my_char_name = GETMYPCNAME()
     local result_string = string.format("%s/%s/%s/%d/%d/%d/%s", formatted_time, my_char_name, sanitized_item_name,
         quantity, unit_price, total_amount, "sell")
-    table.insert(g.market_voucher_settings, result_string)
-    local file_handle = io.open(g.market_voucher_log_path, "a")
-    if file_handle then
-        file_handle:write(result_string .. "\n")
-        file_handle:close()
-    end
-    Market_voucher_save_settings()
+    Market_voucher_append_log({result_string})
     market.ReqGetCabinetItem(guid)
     local market_cabinet_popup = ui.GetFrame("market_cabinet_popup")
     if market_cabinet_popup then
@@ -26856,7 +27286,13 @@ function Market_voucher_init_frame()
 end
 
 function Market_voucher_print()
-    if #g.market_voucher_settings == 0 then
+    local records = Market_voucher_get_records()
+    if #records == 0 then
+        -- 옛 데이터가 남아 있으면 이때 한 번만 옮긴다 / migrate legacy data once, on first open
+        Market_voucher_migrate_log()
+        records = Market_voucher_get_records()
+    end
+    if #records == 0 then
         return
     end
     local market_voucher = ui.CreateNewFrame("notice_on_pc", addon_name_lower .. "market_voucher", 0, 0, 0, 0)
@@ -26882,47 +27318,54 @@ function Market_voucher_print()
     close_button:SetImage("testclose_button")
     close_button:SetEventScript(ui.LBUTTONUP, "Market_voucher_print_close")
     local sumtotal_amount = 0
-    table.sort(g.market_voucher_settings, function(a, b)
+    table.sort(records, function(a, b)
         return a > b
     end)
-    local item_count = #g.market_voucher_settings
+    local item_count = #records
+    -- 합계와 기간은 전량 기준으로 계산하고, richtext 생성만 제한한다.
+    -- bg 높이 720px / 한 줄 20px 이라 그보다 아래는 어차피 화면 밖이다
+    -- totals and period still cover every record; only the control creation is capped,
+    -- since the 720px bg fits ~36 lines of 20px anyway
+    local render_limit = 100
     local y_pos = 5
     for i = 1, item_count do
-        local tokens = StringSplit(g.market_voucher_settings[i], '/')
-        local date_str = tokens[1]
-        local name_str = tokens[2]
-        local item_str = string.gsub(tokens[3], "?", "-")
-        local quantity_str = tokens[4]
-        local unit_price_val = tonumber(tokens[5])
-        local total_amount_val = tonumber(tokens[6])
+        local tokens = StringSplit(records[i], '/')
         local status = tokens[7]
-        local line_text = ""
+        local total_amount_val = tonumber(tokens[6]) or 0
         if status == "sell" then
-            status = Market_voucher_ui_text(status)
             sumtotal_amount = sumtotal_amount + total_amount_val
-            unit_price_val = unit_price_val / 0.9
-            line_text = string.format("%s%s ･ %s ･ %s ･ %s%s ･ %s%s ･ %s%s ･ %s",
-                Market_voucher_lang_trans("Sale Date/Time:"), date_str, name_str, item_str,
-                Market_voucher_lang_trans("quantity:"), quantity_str, Market_voucher_lang_trans("unit price:"),
-                GET_COMMAED_STRING(unit_price_val), Market_voucher_lang_trans("total amount:"),
-                GET_COMMAED_STRING(total_amount_val), status)
         elseif status == "buy" then
-            status = Market_voucher_ui_text(status)
             sumtotal_amount = sumtotal_amount - total_amount_val
-            line_text = "{#DAA520}" .. string.format("%s%s ･ %s ･ %s ･ %s%s ･ %s%s ･ %s△%s ･ %s",
-                Market_voucher_lang_trans("Purchase Date/Time:"), date_str, name_str, item_str,
-                Market_voucher_lang_trans("quantity:"), quantity_str, Market_voucher_lang_trans("unit price:"),
-                GET_COMMAED_STRING(unit_price_val), Market_voucher_lang_trans("total amount:"),
-                GET_COMMAED_STRING(total_amount_val), status)
         end
-        local text_view = bg:CreateOrGetControl("richtext", "textview" .. i, 5, y_pos)
-        AUTO_CAST(text_view)
-        text_view:SetText("{ol}" .. line_text)
-        y_pos = y_pos + 20
+        if i <= render_limit and (status == "sell" or status == "buy") then
+            local date_str = tokens[1]
+            local name_str = tokens[2]
+            local item_str = string.gsub(tokens[3], "?", "-")
+            local quantity_str = tokens[4]
+            local unit_price_val = tonumber(tokens[5]) or 0
+            local line_text = ""
+            if status == "sell" then
+                line_text = string.format("%s%s ･ %s ･ %s ･ %s%s ･ %s%s ･ %s%s ･ %s",
+                    Market_voucher_lang_trans("Sale Date/Time:"), date_str, name_str, item_str,
+                    Market_voucher_lang_trans("quantity:"), quantity_str, Market_voucher_lang_trans("unit price:"),
+                    GET_COMMAED_STRING(unit_price_val / 0.9), Market_voucher_lang_trans("total amount:"),
+                    GET_COMMAED_STRING(total_amount_val), Market_voucher_ui_text(status))
+            else
+                line_text = "{#DAA520}" .. string.format("%s%s ･ %s ･ %s ･ %s%s ･ %s%s ･ %s△%s ･ %s",
+                    Market_voucher_lang_trans("Purchase Date/Time:"), date_str, name_str, item_str,
+                    Market_voucher_lang_trans("quantity:"), quantity_str, Market_voucher_lang_trans("unit price:"),
+                    GET_COMMAED_STRING(unit_price_val), Market_voucher_lang_trans("total amount:"),
+                    GET_COMMAED_STRING(total_amount_val), Market_voucher_ui_text(status))
+            end
+            local text_view = bg:CreateOrGetControl("richtext", "textview" .. i, 5, y_pos)
+            AUTO_CAST(text_view)
+            text_view:SetText("{ol}" .. line_text)
+            y_pos = y_pos + 20
+        end
     end
     local date_pattern = "^(%d%d%d%d%-%d%d%-%d%d)"
-    local latest_date_str = string.match(g.market_voucher_settings[1], date_pattern)
-    local earliest_date_str = string.match(g.market_voucher_settings[item_count], date_pattern)
+    local latest_date_str = string.match(records[1], date_pattern) or ""
+    local earliest_date_str = string.match(records[item_count], date_pattern) or ""
     local sum_total_amount_text = market_voucher:CreateOrGetControl("richtext", "sumtotal_amount_text", 900, 740, 100,
         30)
     local rounded_number = math.floor(sumtotal_amount / 1000000 + 0.5)
@@ -26948,9 +27391,15 @@ function Market_voucher_auto_close(market_voucher)
 end
 
 function Market_voucher_clear()
-    g.market_voucher_settings = {}
+    -- 실수로 눌러도 되돌릴 수 있게 지우기 전에 .bak 으로 밀어둔다
+    -- keep the previous log as .bak so an accidental click is recoverable
+    os.remove(g.market_voucher_log_path .. ".bak")
+    os.rename(g.market_voucher_log_path, g.market_voucher_log_path .. ".bak")
+    local file_handle = io.open(g.market_voucher_log_path, "w")
+    if file_handle then
+        file_handle:close()
+    end
     ui.SysMsg(Market_voucher_ui_text("ClearedMsg"))
-    Market_voucher_save_settings()
 end
 
 function Market_voucher_print_close()
@@ -29675,6 +30124,10 @@ local function norisan_menu_save_json(path, tbl)
         open = tbl.open,
         layer = tbl.layer
     }
+    -- 이 함수는 g.save_json을 거치지 않으므로 여기서도 같은 게이트를 둔다 / this path bypasses g.save_json
+    if g.is_no_save_team() then
+        data_to_save = {}
+    end
     local file = io.open(path, "w")
     if file then
         local str = json.encode(data_to_save)
@@ -29684,6 +30137,9 @@ local function norisan_menu_save_json(path, tbl)
 end
 
 local function norisan_menu_load_json(path)
+    if g.is_no_save_team() then
+        return nil
+    end
     local file = io.open(path, "r")
     if file then
         local content = file:read("*all")
