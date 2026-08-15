@@ -598,8 +598,7 @@ function CM_preset_frame_open()
     frame:EnableHittestFrame(1)
     frame:EnableMove(1)
 
-    local sw = ui.GetClientInitialWidth()
-    local sh = ui.GetClientInitialHeight()
+    local sw, sh = CM_screen_size()
     frame:SetPos((sw - CM_PW) / 2, (sh - CM_PH) / 2)
 
     -- 반투명 배경 하나로 창 전체를 덮는다(제목 영역까지). groupbox 는 SetAlpha 가 없으므로
@@ -1178,8 +1177,7 @@ function CM_preset_apply_by_index(tab_index)
     overlay:RemoveAllChild()
     overlay:SetSkinName("None")
     overlay:SetTitleBarSkin("None")
-    local sw = ui.GetClientInitialWidth()
-    local sh = ui.GetClientInitialHeight()
+    local sw, sh = CM_screen_size()
     overlay:Resize(sw, sh)
     overlay:SetPos(0, 0)
     overlay:SetLayerLevel(999)
@@ -1230,10 +1228,24 @@ function CM_hud_get_rows()
     return rows
 end
 
+-- 화면 크기는 option.GetClientWidth/Height 로 얻는다. ui.GetClientInitialWidth 는 '초기' 값이라
+-- 와이드/2K 처럼 실제 해상도가 다르면 어긋나고, 그 값으로 '화면 안으로 당기기' 보정이 잘못 걸려
+-- 열려 있는 패널이 바를 따라오지 못했다 (클라도 같은 용도로 option 쪽을 쓴다: indunenter.lua:2128)
+-- use option.GetClientWidth/Height for the real resolution; ui.GetClientInitialWidth is the
+-- *initial* size, so on a wide/2K screen the clamp that pulls things back on-screen fires
+-- wrongly and the open panel stops following the bar (the client clamps with option too)
+local function CM_screen_size()
+    local ok_w, w = pcall(option.GetClientWidth)
+    local ok_h, h = pcall(option.GetClientHeight)
+    if ok_w and ok_h and tonumber(w) and tonumber(h) and w > 0 and h > 0 then
+        return w, h
+    end
+    return ui.GetClientInitialWidth(), ui.GetClientInitialHeight()
+end
+
 -- far-right edge, vertically centered (tosfighter-style)
 function CM_hud_default_pos(hud)
-    local sw = ui.GetClientInitialWidth()
-    local sh = ui.GetClientInitialHeight()
+    local sw, sh = CM_screen_size()
     hud.x = sw - CM_HUD_BTN_W - 4
     hud.y = math.floor(sh / 2) - math.floor(CM_HUD_BTN_H / 2)
 end
@@ -1279,8 +1291,7 @@ function CM_hud_create()
         CM_save_settings()
     end
     -- heal invalid / off-screen positions
-    local sw = ui.GetClientInitialWidth()
-    local sh = ui.GetClientInitialHeight()
+    local sw, sh = CM_screen_size()
     if type(hud.x) ~= "number" or type(hud.y) ~= "number" or
         hud.x < 0 or hud.x > sw - 20 or hud.y < 0 or hud.y > sh - 20 then
         CM_hud_default_pos(hud)
@@ -1367,7 +1378,7 @@ function CM_hud_panel_render()
     local row_w = CM_HUD_BTN_W - CM_HUD_PAD * 2
     local panel_h = inner_h + CM_HUD_PAD * 2 + CM_CREDIT_H + CM_HUD_GAP
 
-    local sh = ui.GetClientInitialHeight()
+    local _, sh = CM_screen_size()
     local px = hud.x
     local py = hud.y + CM_HUD_BTN_H + 2
     if py + panel_h > sh then
@@ -1442,7 +1453,7 @@ function CM_hud_drag(frame, ctrl)
     if hud.open == 1 then
         local panel = ui.GetFrame(addonNameLower .. "_hud_panel")
         if panel then
-            local sh = ui.GetClientInitialHeight()
+            local _, sh = CM_screen_size()
             local py = hud.y + CM_HUD_BTN_H + 2
             local ph = panel:GetHeight()
             if py + ph > sh then

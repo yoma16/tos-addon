@@ -1,6 +1,6 @@
 [
   {
-    "tosversion" : "20260221",
+    "tosversion" : "20260816",
     "name": "Cupole manager",
     "file": "cupole_manager",
     "extension": "ipf",
@@ -22,7 +22,7 @@
     "tags": ["yomae", "cupole", "addons", "toggle cupole potion", "toggle", "potion", "요매", "yoma16", "큐폴"]
   },
   {
-    "tosversion" : "20260729",
+    "tosversion" : "20260816",
     "name": "New Nexus Addons",
     "file": "new_nexus_addons",
     "extension": "ipf",
