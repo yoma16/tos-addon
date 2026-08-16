@@ -1,5 +1,7 @@
+-- v1.0.0 first release
+-- v1.1.0 restyle the window to the shared theme and fix ESC stopping a closed run
 local addonName = "auto_ads"
-local version = "1.0.0"
+local version = "1.1.0"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -25,7 +27,9 @@ local AA_LANG = {
         stopped             = "[Auto Ads] 종료 (총 %d회 전송)",
         no_megaphone        = "[Auto Ads] 확성기가 없어 자동 종료합니다.",
         sent                = "[Auto Ads] 전송 #%d",
-        msg_type_label      = "메시지 종류:",
+        msg_type_label      = "CHANNEL",
+        settings_label      = "SETTINGS",
+        status_label        = "STATUS",
         interval_label      = "전송 주기(초):",
         message_label       = "메시지:",
         btn_start           = "시작",
@@ -39,6 +43,8 @@ local AA_LANG = {
         type_shout          = "외침",
         type_guild          = "길드",
         type_guild_notice   = "길드강조",
+        credit_name         = "요매",
+        credit_tip          = "{ol}요매에게 귓속말",
     },
     eng = {
         loaded              = "[Auto Ads] Loaded.",
@@ -50,7 +56,9 @@ local AA_LANG = {
         stopped             = "[Auto Ads] Stopped (total %d sent)",
         no_megaphone        = "[Auto Ads] No megaphones left. Auto-stopped.",
         sent                = "[Auto Ads] Sent #%d",
-        msg_type_label      = "Message type:",
+        msg_type_label      = "CHANNEL",
+        settings_label      = "SETTINGS",
+        status_label        = "STATUS",
         interval_label      = "Interval (sec):",
         message_label       = "Message:",
         btn_start           = "Start",
@@ -64,6 +72,8 @@ local AA_LANG = {
         type_shout          = "Shout",
         type_guild          = "Guild",
         type_guild_notice   = "Guild Notice",
+        credit_name         = "Yomae",
+        credit_tip          = "{ol}Whisper to Yomae",
     },
 }
 
@@ -316,15 +326,90 @@ end
 -- ============================================================
 -- UI
 -- ============================================================
-local FRAME_W = 800
-local FRAME_H = 350
+-- 창 배경은 스킨 + 알파로 낸다. groupbox 는 SetAlpha 가 없어서 구역 투명도는 스킨으로만 낸다
+-- (cupole_manager / hideplayer 와 같은 값. `.claude/docs/addon-theme-style.md` §2)
+-- the window gets its translucency from skin + alpha; a groupbox has no SetAlpha, so the
+-- regions can only get theirs from a skin. same values as cupole_manager and hideplayer
+local AA_UI_SKIN = "bg2"
+local AA_UI_ALPHA = 110
+local AA_SECTION_SKIN = "blackbox_op_50"     -- 구역 패널 / region panel
+local AA_INPUT_SKIN = "blackbox_op_80"       -- 입력칸·선택된 버튼 / inputs and the active button
 
+local FRAME_W = 560
+local FRAME_H = 410
+local PAD = 14                       -- 창 좌우 여백 / window side padding
+local INNER = FRAME_W - PAD * 2
+local SEC_INSET = 6                  -- 구역 패널 안쪽 여백 / padding inside a region panel
+local CLOSE_SIZE = 36                -- 제목 {s22} 에 맞춘 크기 / sized to the {s22} title
+
+-- 세로 배치. 구역마다 머리글 -> 패널 순서이고, 패널이 끝나면 다음 머리글까지 12px 띄운다
+-- vertical layout: heading then panel per region, 12px before the next heading
+local TITLE_Y = 10
+local TITLE_LINE_Y = 48
+local S1_HEAD_Y, S1_PANEL_Y, S1_PANEL_H = 58, 80, 42
+local S2_HEAD_Y, S2_PANEL_Y, S2_PANEL_H = 134, 156, 76
+local BTN_Y, BTN_H = 244, 32
+local S3_HEAD_Y, S3_PANEL_Y, S3_PANEL_H = 288, 310, 60
+local CREDIT_Y = 380
+
+-- 선택된 채널 글자색 = 게임 채팅창의 채널 버튼 색 그대로.
+-- 값 출처는 클라 `chat/chat.xml` 의 userconfig `COLOR_BTN_*` (채팅 종류 버튼에 SetColorTone 으로
+-- 쓰이는 값. chat_type.lua:44 참조). 인덱스는 1 일반 / 2 외침 / 3 파티 / 4 길드 / 5 귓속말 / 9 길드강조.
+-- 길드강조가 9 인 것은 chatframe.xml 의 TEXTCHAT_FONTSTYLE_GUILD_NOTICE(#FF44FF) 와
+-- COLOR_BTN_9 가 정확히 같은 값이라 확인된다
+-- the selected channel takes the colour of the game's own chat-type button. values come from the
+-- client's chat/chat.xml userconfig COLOR_BTN_* (fed to SetColorTone in chat_type.lua:44).
+-- index 9 is guild notice, confirmed because it matches TEXTCHAT_FONTSTYLE_GUILD_NOTICE exactly
 local MSG_TYPES = {
-    { cmd = "/s", label_key = "type_normal",       color = "#00ff00" },
-    { cmd = "/y", label_key = "type_shout",        color = "#00ff00" },
-    { cmd = "/g", label_key = "type_guild",        color = "#00ff00" },
-    { cmd = "/gn", label_key = "type_guild_notice", color = "#4488ff" },
+    { cmd = "/s",  label_key = "type_normal",       color = "#FFFFFF" },   -- COLOR_BTN_1 일반
+    { cmd = "/y",  label_key = "type_shout",        color = "#FF8A00" },   -- COLOR_BTN_2 외침
+    { cmd = "/g",  label_key = "type_guild",        color = "#E596FF" },   -- COLOR_BTN_4 길드
+    -- 길드강조만 버튼 색(COLOR_BTN_9 = #FF44FF)을 안 쓴다. 그 값은 자홍에 가까워 바로 위의
+    -- 길드(#E596FF)와 잘 구분되지 않는다. 대신 같은 chat.xml 의 길드 대화 본문 색을 쓴다
+    -- guild notice is the one channel that does not take its button colour (COLOR_BTN_9 = #FF44FF):
+    -- that value reads as magenta and sits too close to guild above it. this is the guild message
+    -- body colour from the same chat.xml instead
+    { cmd = "/gn", label_key = "type_guild_notice", color = "#A735DC" },   -- COLOR_MY_GUILD 진한 보라
 }
+
+-- 구역 머리글 + 그 아래 패널. 패널을 먼저 만들면 머리글이 가려지므로 머리글을 먼저 만든다
+-- (TOS 는 생성 순서가 곧 z-order)
+-- a region heading and the panel under it. the heading is created first because TOS draws in
+-- creation order and a later panel would cover it
+local function AA_section(frame, key, y, text, panel_y, panel_h)
+    local head = frame:CreateOrGetControl("richtext", key .. "_head", PAD + 2, y, INNER, 20)
+    AUTO_CAST(head)
+    head:SetFontName("white_16_ol")
+    head:SetText("{ol}{s14}" .. text)
+    head:EnableHitTest(false)
+
+    local panel = frame:CreateOrGetControl("groupbox", key .. "_panel", PAD, panel_y, INNER, panel_h)
+    AUTO_CAST(panel)
+    panel:SetSkinName(AA_SECTION_SKIN)
+    panel:EnableScrollBar(0)
+    panel:EnableHittestGroupBox(false)
+    return panel
+end
+
+-- 클라 search_editbox 방식: 보이는 박스를 깔고 그 안에 skin 없는 edit 을 넣어야
+-- 캐럿이 테두리에 붙지 않는다. 박스는 hittest 를 꺼서 클릭을 edit 에 넘긴다
+-- the client's search_editbox shape: a visible box with a skinless edit inside, so the caret
+-- keeps its inset. the box has hit test off so the edit still takes the click
+local function AA_input(frame, key, x, y, w, text)
+    local box = frame:CreateOrGetControl("groupbox", key .. "_bg", x, y, w, 26)
+    AUTO_CAST(box)
+    box:SetSkinName(AA_INPUT_SKIN)
+    box:EnableScrollBar(0)
+    box:EnableHittestGroupBox(false)
+
+    local edit = frame:CreateOrGetControl("edit", key, x + 6, y + 3, w - 12, 20)
+    AUTO_CAST(edit)
+    edit:SetSkinName("None")
+    edit:SetFontName("white_14_ol")
+    edit:SetTextAlign("left", "center")
+    edit:SetText(text or "")
+    return edit
+end
 
 function AA_open_frame()
     if not g.ready then
@@ -340,147 +425,29 @@ function AA_open_frame()
         AA_close_frame()
         return
     end
-    frame = ui.CreateNewFrame("notice_on_pc", frame_name, 0, 0, 0, 0)
+    -- 창은 파괴하지 않고 숨기므로(테마 §5) 이미 있으면 그대로 다시 쓴다
+    -- the window is hidden rather than destroyed, so reuse it when it already exists
+    if not frame then
+        frame = ui.CreateNewFrame("notice_on_pc", frame_name, 0, 0, 0, 0)
+        AUTO_CAST(frame)
+        local sw = ui.GetClientInitialWidth()
+        local sh = ui.GetClientInitialHeight()
+        frame:SetPos((sw - FRAME_W) / 2, (sh - FRAME_H) / 2)
+    end
     AUTO_CAST(frame)
     frame:RemoveAllChild()
     frame:Resize(FRAME_W, FRAME_H)
-    frame:SetSkinName("None")
+    frame:SetSkinName(AA_UI_SKIN)
+    frame:SetAlpha(AA_UI_ALPHA)
     frame:SetTitleBarSkin("None")
     frame:SetLayerLevel(92)
     frame:EnableHittestFrame(1)
     frame:EnableMove(1)
 
-    local sw = ui.GetClientInitialWidth()
-    local sh = ui.GetClientInitialHeight()
-    frame:SetPos((sw - FRAME_W) / 2, (sh - FRAME_H) / 2)
+    AA_build_frame(frame)
 
-    -- background
-    local bg = frame:CreateOrGetControl("groupbox", "bg", FRAME_W, FRAME_H - 40, ui.LEFT, ui.TOP, 0, 40, 0, 0)
-    AUTO_CAST(bg)
-    bg:SetSkinName("test_frame_low")
-    bg:EnableHittestGroupBox(false)
-
-    -- title bar
-    local title_bg = frame:CreateOrGetControl("groupbox", "title_bg", FRAME_W, 61, ui.LEFT, ui.TOP, 0, 0, 0, 0)
-    AUTO_CAST(title_bg)
-    title_bg:SetSkinName("test_frame_top")
-    title_bg:EnableHittestGroupBox(false)
-
-    local title = frame:CreateOrGetControl("richtext", "title", 100, 30, ui.CENTER_HORZ, ui.TOP, 0, 18, 0, 0)
-    title:SetText("{@st43}{s18}Auto Ads{/}")
-    title:EnableHitTest(false)
-
-    local close = frame:CreateOrGetControl("button", "close", 44, 44, ui.RIGHT, ui.TOP, 0, 20, 17, 0)
-    AUTO_CAST(close)
-    close:SetImage("testclose_button")
-    close:SetEventScript(ui.LBUTTONUP, "AA_close_frame")
-
-    -- language toggle button
-    local lang = g.settings.lang or "kor"
-    local lang_text = (lang == "kor") and "KOR" or "ENG"
-    local btn_lang = frame:CreateOrGetControl("button", "btn_lang", 50, 22, ui.RIGHT, ui.TOP, 0, 58, 17, 0)
-    AUTO_CAST(btn_lang)
-    btn_lang:SetText("{ol}{s12}{#aaaaaa}" .. lang_text)
-    btn_lang:SetOverSound("button_over")
-    btn_lang:SetClickSound("button_click_stats")
-    btn_lang:SetEventScript(ui.LBUTTONUP, "AA_on_lang_click")
-
-    -- message type buttons
-    local y = 60
-    local lbl_type = frame:CreateOrGetControl("richtext", "lbl_type", 20, y, 120, 25)
-    lbl_type:SetText("{ol}{s14}" .. AA_L("msg_type_label"))
-    lbl_type:EnableHitTest(false)
-
-    local current_type = g.settings.msg_type or "/y"
-    for i, t in ipairs(MSG_TYPES) do
-        local bx = 140 + (i - 1) * 80
-        local btn = frame:CreateOrGetControl("button", "btn_type_" .. i, bx, y - 2, 75, 28)
-        AUTO_CAST(btn)
-        if current_type == t.cmd then
-            btn:SetText("{ol}{s14}{" .. t.color .. "}" .. AA_L(t.label_key))
-        else
-            btn:SetText("{ol}{s14}" .. AA_L(t.label_key))
-        end
-        btn:SetOverSound("button_over")
-        btn:SetClickSound("button_click_stats")
-        btn:SetUserValue("MSG_CMD", t.cmd)
-        btn:SetEventScript(ui.LBUTTONUP, "AA_on_type_click")
-    end
-
-    -- interval label + edit
-    y = y + 35
-    local lbl_interval = frame:CreateOrGetControl("richtext", "lbl_interval", 20, y, 120, 25)
-    lbl_interval:SetText("{ol}{s14}" .. AA_L("interval_label"))
-    lbl_interval:EnableHitTest(false)
-
-    local edit_interval = frame:CreateOrGetControl("edit", "edit_interval", 140, y - 2, 190, 28)
-    AUTO_CAST(edit_interval)
-    edit_interval:SetFontName("white_14_ol")
-    edit_interval:SetTextAlign("left", "center")
-    edit_interval:SetSkinName("inventory_serch")
-    edit_interval:SetText(tostring(g.settings.interval or 60))
-
-    -- message label + edit (wide)
-    y = y + 35
-    local lbl_message = frame:CreateOrGetControl("richtext", "lbl_message", 20, y, 120, 25)
-    lbl_message:SetText("{ol}{s14}" .. AA_L("message_label"))
-    lbl_message:EnableHitTest(false)
-
-    local edit_message = frame:CreateOrGetControl("edit", "edit_message", 140, y - 2, FRAME_W - 160, 28)
-    AUTO_CAST(edit_message)
-    edit_message:SetFontName("white_14_ol")
-    edit_message:SetTextAlign("left", "center")
-    edit_message:SetSkinName("inventory_serch")
-    edit_message:SetText(g.settings.message or "")
-
-    -- buttons (centered)
-    y = y + 45
-    local btn_gap = 20
-    local btn_w = 70
-    local btn_start_x = (FRAME_W - btn_w * 2 - btn_gap) / 2
-    local btn_start = frame:CreateOrGetControl("button", "btn_start", btn_w, 35, ui.LEFT, ui.TOP, btn_start_x, y, 0, 0)
-    AUTO_CAST(btn_start)
-    btn_start:SetText("{ol}{s14}" .. AA_L("btn_start"))
-    btn_start:SetOverSound("button_over")
-    btn_start:SetClickSound("button_click_stats")
-    btn_start:SetEventScript(ui.LBUTTONUP, "AA_on_start_click")
-
-    local btn_stop = frame:CreateOrGetControl("button", "btn_stop", btn_w, 35, ui.LEFT, ui.TOP, btn_start_x + btn_w + btn_gap, y, 0, 0)
-    AUTO_CAST(btn_stop)
-    btn_stop:SetText("{ol}{s14}" .. AA_L("btn_stop"))
-    btn_stop:SetOverSound("button_over")
-    btn_stop:SetClickSound("button_click_stats")
-    btn_stop:SetEventScript(ui.LBUTTONUP, "AA_on_stop_click")
-
-    -- status display
-    y = y + 50
-    local lbl_status = frame:CreateOrGetControl("richtext", "lbl_status", 20, y, FRAME_W - 40, 20)
-    lbl_status:SetText("{ol}{s14}" .. AA_L("status_stopped"))
-    lbl_status:EnableHitTest(false)
-
-    y = y + 25
-    local lbl_start_time = frame:CreateOrGetControl("richtext", "lbl_start_time", 20, y, FRAME_W - 40, 20)
-    lbl_start_time:SetText("{ol}{s14}" .. string.format(AA_L("start_time"), "--:--:--"))
-    lbl_start_time:EnableHitTest(false)
-
-    y = y + 25
-    local lbl_count = frame:CreateOrGetControl("richtext", "lbl_count", 20, y, FRAME_W - 40, 20)
-    lbl_count:SetText("{ol}{s14}" .. string.format(AA_L("send_count"), 0))
-    lbl_count:EnableHitTest(false)
-
-    y = y + 25
-    local lbl_megaphone = frame:CreateOrGetControl("richtext", "lbl_megaphone", 20, y, FRAME_W - 40, 20)
-    lbl_megaphone:SetText("{ol}{s14}" .. string.format(AA_L("megaphone_count"), 0))
-    lbl_megaphone:EnableHitTest(false)
-
-    -- credit
-    local lbl_credit = frame:CreateOrGetControl("richtext", "lbl_credit", 0, 0, FRAME_W - 30, 20)
-    lbl_credit:SetGravity(ui.RIGHT, ui.BOTTOM)
-    lbl_credit:SetMargin(0, 0, 15, 10)
-    lbl_credit:SetText("{ol}{s12}{#999999}made by 요매(고양이젤리)")
-    lbl_credit:EnableHitTest(false)
-
-    -- esc close timer
+    -- ESC 닫기 타이머. 숨겨도 프레임과 타이머는 계속 살아 있으므로 IsVisible 가드가 필수다
+    -- the frame and its timers keep running while hidden, hence the IsVisible guard in the tick
     local esc_timer = frame:CreateOrGetControl("timer", "esc_timer", 0, 0)
     AUTO_CAST(esc_timer)
     esc_timer:SetUpdateScript("AA_esc_check")
@@ -496,6 +463,239 @@ function AA_open_frame()
     AA_refresh_ui()
 end
 
+-- 창 내용 전체를 다시 그린다. 언어를 바꿀 때도 이 함수만 다시 부르면 된다
+-- redraws the whole window; switching the language just calls this again
+function AA_build_frame(frame)
+    local title = frame:CreateOrGetControl("richtext", "title", PAD + 2, TITLE_Y, 240, 32)
+    AUTO_CAST(title)
+    title:SetText("{ol}{s22}{b}Auto Ads")
+    title:EnableHitTest(false)
+
+    -- 닫기 버튼. SetImage 가 크기를 이미지 원본으로 되돌리므로 반드시 뒤에서 Resize 한다(테마 §11).
+    -- 제목 글자(위 10, 높이 32)의 세로 중앙 26 에 맞춘다 -> 위 여백 = 26 - 크기/2
+    -- SetImage resets the control to the image's native size, so Resize AFTER it. centred on the
+    -- title text (top 10, height 32 -> centre 26): top margin = 26 - size/2
+    local close = frame:CreateOrGetControl("picture", "close", CLOSE_SIZE, CLOSE_SIZE, ui.RIGHT, ui.TOP, 0,
+        26 - CLOSE_SIZE / 2, PAD, 0)
+    AUTO_CAST(close)
+    close:SetImage("testclose_button")
+    close:SetEnableStretch(1)
+    close:Resize(CLOSE_SIZE, CLOSE_SIZE)
+    close:SetMargin(0, 26 - CLOSE_SIZE / 2, PAD, 0)
+    close:EnableHitTest(1)
+    close:SetEventScript(ui.LBUTTONUP, "AA_close_frame")
+
+    -- 한/영 전환. 닫기 버튼 왼쪽에 간격 8 을 두고 붙인다
+    -- language toggle, 8px left of the close button
+    local lang = g.settings.lang or "kor"
+    local btn_lang = frame:CreateOrGetControl("button", "btn_lang", 46, 22, ui.RIGHT, ui.TOP, 0, 26 - 11,
+        PAD + CLOSE_SIZE + 8, 0)
+    AUTO_CAST(btn_lang)
+    btn_lang:SetSkinName(AA_INPUT_SKIN)
+    btn_lang:SetText("{ol}{s12}" .. ((lang == "kor") and "KOR" or "ENG"))
+    btn_lang:SetOverSound("button_over")
+    btn_lang:SetClickSound("button_click_stats")
+    btn_lang:SetEventScript(ui.LBUTTONUP, "AA_on_lang_click")
+
+    local title_line = frame:CreateOrGetControl("labelline", "title_line", PAD, TITLE_LINE_Y, INNER, 3)
+    AUTO_CAST(title_line)
+    title_line:SetSkinName("labelline2")
+
+    -- 구역 1: 메시지 종류 / region 1: message channel
+    AA_section(frame, "sec_type", S1_HEAD_Y, AA_L("msg_type_label"), S1_PANEL_Y, S1_PANEL_H)
+
+    local type_w = math.floor((INNER - SEC_INSET * 2 - 8 * 3) / 4)
+    local type_y = S1_PANEL_Y + math.floor((S1_PANEL_H - 28) / 2)
+    for i, t in ipairs(MSG_TYPES) do
+        local bx = PAD + SEC_INSET + (i - 1) * (type_w + 8)
+        local btn = frame:CreateOrGetControl("button", "btn_type_" .. i, bx, type_y, type_w, 28)
+        AUTO_CAST(btn)
+        btn:SetOverSound("button_over")
+        btn:SetClickSound("button_click_stats")
+        btn:SetUserValue("MSG_CMD", t.cmd)
+        btn:SetEventScript(ui.LBUTTONUP, "AA_on_type_click")
+    end
+    AA_set_type_visual(frame)
+
+    -- 구역 2: 주기와 메시지 / region 2: interval and message
+    AA_section(frame, "sec_input", S2_HEAD_Y, AA_L("settings_label"), S2_PANEL_Y, S2_PANEL_H)
+
+    local label_x = PAD + SEC_INSET + 4
+    local input_x = PAD + SEC_INSET + 120
+    local input_right = PAD + INNER - SEC_INSET
+    local row1_y = S2_PANEL_Y + 10
+    local row2_y = S2_PANEL_Y + 44
+
+    local lbl_interval = frame:CreateOrGetControl("richtext", "lbl_interval", label_x, row1_y + 4, 116, 20)
+    AUTO_CAST(lbl_interval)
+    lbl_interval:SetText("{ol}{s13}" .. AA_L("interval_label"))
+    lbl_interval:EnableHitTest(false)
+    AA_input(frame, "edit_interval", input_x, row1_y, 140, tostring(g.settings.interval or 60))
+
+    local lbl_message = frame:CreateOrGetControl("richtext", "lbl_message", label_x, row2_y + 4, 116, 20)
+    AUTO_CAST(lbl_message)
+    lbl_message:SetText("{ol}{s13}" .. AA_L("message_label"))
+    lbl_message:EnableHitTest(false)
+    AA_input(frame, "edit_message", input_x, row2_y, input_right - input_x, g.settings.message or "")
+
+    -- 시작 / 정지. 가운데 정렬 / start and stop, centred
+    local btn_w, btn_gap = 100, 20
+    local btn_x = math.floor((FRAME_W - btn_w * 2 - btn_gap) / 2)
+    local btn_start = frame:CreateOrGetControl("button", "btn_start", btn_x, BTN_Y, btn_w, BTN_H)
+    AUTO_CAST(btn_start)
+    btn_start:SetText("{ol}{s14}" .. AA_L("btn_start"))
+    btn_start:SetOverSound("button_over")
+    btn_start:SetClickSound("button_click_stats")
+    btn_start:SetEventScript(ui.LBUTTONUP, "AA_on_start_click")
+
+    local btn_stop = frame:CreateOrGetControl("button", "btn_stop", btn_x + btn_w + btn_gap, BTN_Y, btn_w, BTN_H)
+    AUTO_CAST(btn_stop)
+    btn_stop:SetText("{ol}{s14}" .. AA_L("btn_stop"))
+    btn_stop:SetOverSound("button_over")
+    btn_stop:SetClickSound("button_click_stats")
+    btn_stop:SetEventScript(ui.LBUTTONUP, "AA_on_stop_click")
+
+    -- 구역 3: 상태. 2x2 로 놓아야 4줄로 늘어놓는 것보다 창이 낮아진다
+    -- region 3: status, laid out 2x2 so the window stays shorter than four stacked lines
+    AA_section(frame, "sec_status", S3_HEAD_Y, AA_L("status_label"), S3_PANEL_Y, S3_PANEL_H)
+
+    local col1_x = PAD + SEC_INSET + 4
+    local col2_x = PAD + math.floor(INNER / 2) + 4
+    local col_w = math.floor(INNER / 2) - SEC_INSET - 8
+    local srow1_y = S3_PANEL_Y + 8
+    local srow2_y = srow1_y + 24
+    local status_cells = {
+        { "lbl_status", col1_x, srow1_y },
+        { "lbl_start_time", col2_x, srow1_y },
+        { "lbl_count", col1_x, srow2_y },
+        { "lbl_megaphone", col2_x, srow2_y },
+    }
+    for _, cell in ipairs(status_cells) do
+        local lbl = frame:CreateOrGetControl("richtext", cell[1], cell[2], cell[3], col_w, 20)
+        AUTO_CAST(lbl)
+        lbl:EnableHitTest(false)
+    end
+
+    -- 제작자 표기는 장식이므로 실패해도 창은 떠야 한다 / decorative: must never take the window down
+    pcall(AA_credit_render, frame, FRAME_W, CREDIT_Y, PAD)
+end
+
+-- 선택된 종류만 진한 배경 + 색 글씨, 나머지는 투명 + 회색 (테마 §4 의 탭과 같은 규칙)
+-- the selected channel gets the darker background and coloured text; the rest stay transparent
+-- and grey, the same rule the theme uses for tabs
+function AA_set_type_visual(frame)
+    local current = (g.settings and g.settings.msg_type) or "/y"
+    for i, t in ipairs(MSG_TYPES) do
+        local btn = GET_CHILD(frame, "btn_type_" .. i)
+        if btn then
+            AUTO_CAST(btn)
+            if current == t.cmd then
+                btn:SetSkinName(AA_INPUT_SKIN)
+                btn:SetText("{ol}{s13}{" .. t.color .. "}" .. AA_L(t.label_key))
+            else
+                btn:SetSkinName("None")
+                btn:SetText("{ol}{s13}{#AAAAAA}" .. AA_L(t.label_key))
+            end
+        end
+    end
+end
+
+-- ============================================================
+-- 제작자 표기 ("made by [길드 엠블럼] 요매")
+--   길드 엠블럼은 UI 이미지가 아니라 서버에서 받아오는 PNG 라서 SetImage 가 아니라
+--   picture:SetFileName 으로 붙인다. 글자 폭은 상수로 잡으면 다국어에서 엠블럼과 겹치므로
+--   GetTextWidth 로 재서 오른쪽 정렬한다. 클릭은 picture 에만 건다 --
+--   런타임에 만든 richtext 는 클릭 이벤트를 받지 못한다
+--   the emblem is a downloaded PNG, so it goes in via picture:SetFileName; the caption width is
+--   measured, never guessed; and only the picture takes the click (runtime richtext cannot)
+-- ============================================================
+local AA_CREDIT_H = 18
+local AA_CREDIT_EMBLEM = 16
+local AA_CREDIT_GAP = 3
+local AA_CREDIT_MADEBY_W = 64   -- GetTextWidth 실패 시 예비 폭 / fallback if the measure fails
+local AA_CREDIT_NAME_W = 44
+local AA_CREDIT_GUILD_ID = "1038076415618784"    -- 고양이젤리
+local AA_CREDIT_WHISPER_NAME = "요매"
+
+function AA_credit_render(parent, parent_w, y, pad)
+    -- ⚠️ 이름과 툴팁은 AA_L 로 뽑는다. 다른 애드온은 클라 언어(option.GetCurrentCountry())를
+    -- 따르지만 auto_ads 는 창 안에 KOR/ENG 토글이 따로 있어서, 클라 언어를 보면 ENG 로 바꿔도
+    -- "요매" 가 그대로 남는다
+    -- ⚠️ the name and tooltip come from AA_L. the other addons follow the client language, but
+    -- auto_ads has its own KOR/ENG toggle: reading the client language left the Korean name in
+    -- place after switching the window to English
+    local made_by = parent:CreateOrGetControl("richtext", "credit_madeby", pad, y, AA_CREDIT_MADEBY_W, AA_CREDIT_H)
+    AUTO_CAST(made_by)
+    made_by:SetText("{ol}{s12}{#AAAAAA}made by")
+
+    local name = parent:CreateOrGetControl("richtext", "credit_name", pad, y, AA_CREDIT_NAME_W, AA_CREDIT_H)
+    AUTO_CAST(name)
+    name:SetText("{ol}{s12}" .. AA_L("credit_name"))
+
+    -- 폭이 바뀌므로 매번 다시 재야 한다. 이름 길이가 다르면(요매 vs Yomae) 엠블럼 위치도 밀린다
+    -- the width must be re-measured every time: a different name length moves the emblem too
+    local made_w = made_by:GetTextWidth()
+    if not made_w or made_w <= 0 then
+        made_w = AA_CREDIT_MADEBY_W
+    end
+    local name_w = name:GetTextWidth()
+    if not name_w or name_w <= 0 then
+        name_w = AA_CREDIT_NAME_W
+    end
+    made_by:Resize(made_w, AA_CREDIT_H)
+    name:Resize(name_w, AA_CREDIT_H)
+
+    local total_w = made_w + AA_CREDIT_GAP + AA_CREDIT_EMBLEM + AA_CREDIT_GAP + name_w
+    local cx = math.max(0, parent_w - pad - total_w)
+    made_by:SetOffset(cx, y)
+
+    local emblem = parent:CreateOrGetControl("picture", "credit_emblem", cx + made_w + AA_CREDIT_GAP,
+        y + math.floor((AA_CREDIT_H - AA_CREDIT_EMBLEM) / 2), AA_CREDIT_EMBLEM, AA_CREDIT_EMBLEM)
+    AUTO_CAST(emblem)
+    -- ⚠️ CreateOrGetControl 은 이미 있는 컨트롤을 다시 배치하지 않는다. 언어를 바꾸면 이름 폭이
+    -- 달라져(요매 vs Yomae) 엠블럼이 옛 자리에 남으므로 매번 SetOffset 으로 다시 놓는다
+    -- ⚠️ CreateOrGetControl does not reposition an existing control. switching the language
+    -- changes the name width, so the emblem has to be placed again every time
+    emblem:SetOffset(cx + made_w + AA_CREDIT_GAP, y + math.floor((AA_CREDIT_H - AA_CREDIT_EMBLEM) / 2))
+    emblem:SetEnableStretch(1)
+    emblem:EnableHitTest(true)
+    emblem:SetEventScript(ui.LBUTTONUP, "AA_credit_whisper")
+    emblem:SetTextTooltip(AA_L("credit_tip"))
+
+    name:SetOffset(cx + made_w + AA_CREDIT_GAP + AA_CREDIT_EMBLEM + AA_CREDIT_GAP, y)
+
+    pcall(GetGuildEmblemImage, "AA_credit_emblem_loaded", AA_CREDIT_GUILD_ID)
+end
+
+function AA_credit_whisper()
+    pcall(ui.WhisperTo, AA_CREDIT_WHISPER_NAME)
+end
+
+function AA_credit_emblem_loaded(code, return_json)
+    if code ~= 200 then
+        return
+    end
+    local frame = ui.GetFrame(addonNameLower .. "_main")
+    if not frame then
+        return
+    end
+    local emblem = GET_CHILD(frame, "credit_emblem")
+    if not emblem then
+        return
+    end
+    local ok_w, world_id = pcall(session.party.GetMyWorldIDStr)
+    if not ok_w then
+        return
+    end
+    local ok_n, image_name = pcall(guild.GetEmblemImageName, AA_CREDIT_GUILD_ID, world_id)
+    if not ok_n or not image_name then
+        return
+    end
+    AUTO_CAST(emblem)
+    emblem:SetImage("")
+    emblem:SetFileName(image_name)
+end
+
 function AA_close_frame()
     if g.running then
         AA_stop()
@@ -503,11 +703,18 @@ function AA_close_frame()
     local frame_name = addonNameLower .. "_main"
     local frame = ui.GetFrame(frame_name)
     if frame then
-        ui.DestroyFrame(frame_name)
+        frame:ShowWindow(0)
     end
 end
 
 function AA_esc_check(frame)
+    -- 창을 숨겨도 타이머는 계속 돌기 때문에, 가드가 없으면 창이 닫힌 상태에서 ESC 를 누를 때마다
+    -- AA_close_frame 이 불려 실행 중인 전송이 멈춘다
+    -- the timer keeps ticking while the window is hidden; without this guard every ESC would call
+    -- AA_close_frame and stop a running broadcast
+    if not frame or frame:IsVisible() ~= 1 then
+        return
+    end
     if keyboard.IsKeyPressed("ESCAPE") == 1 then
         AA_close_frame()
     end
@@ -525,18 +732,10 @@ function AA_on_type_click(frame, ctrl)
     local cmd = ctrl:GetUserValue("MSG_CMD")
     g.settings.msg_type = cmd
     AA_save_settings()
-    -- refresh type button colors
     local main_frame = ui.GetFrame(addonNameLower .. "_main")
     if not main_frame then return end
-    for i, t in ipairs(MSG_TYPES) do
-        local btn = GET_CHILD(main_frame, "btn_type_" .. i)
-        AUTO_CAST(btn)
-        if t.cmd == cmd then
-            btn:SetText("{ol}{s14}{" .. t.color .. "}" .. AA_L(t.label_key))
-        else
-            btn:SetText("{ol}{s14}" .. AA_L(t.label_key))
-        end
-    end
+    AA_set_type_visual(main_frame)
+    AA_refresh_ui()
 end
 
 function AA_on_start_click()
@@ -566,25 +765,29 @@ function AA_on_lang_click()
     local lang = g.settings.lang or "kor"
     g.settings.lang = (lang == "kor") and "eng" or "kor"
     AA_save_settings()
-    -- destroy current frame, then reopen after a short delay
-    local frame_name = addonNameLower .. "_main"
-    local frame = ui.GetFrame(frame_name)
-    if frame then
-        ui.DestroyFrame(frame_name)
+    -- 창을 부수고 다시 여는 대신 내용만 다시 그린다. 부수면 AA_close_frame 을 타지 않더라도
+    -- 창이 한 번 사라졌다 나타나 깜빡이고, 타이머도 다시 만들어야 했다
+    -- redraw in place instead of destroying and reopening: the old path made the window blink and
+    -- forced the timers to be rebuilt
+    local frame = ui.GetFrame(addonNameLower .. "_main")
+    if not frame then
+        return
     end
-    local reopen_timer = g.frame:CreateOrGetControl("timer", "lang_reopen_timer", 0, 0)
-    AUTO_CAST(reopen_timer)
-    reopen_timer:SetUpdateScript("AA_lang_reopen")
-    reopen_timer:Start(0.05)
-end
-
-function AA_lang_reopen()
-    local reopen_timer = GET_CHILD(g.frame, "lang_reopen_timer")
-    if reopen_timer then
-        AUTO_CAST(reopen_timer)
-        reopen_timer:Stop()
+    AUTO_CAST(frame)
+    -- 입력 중이던 값은 유지한다. 언어를 바꿨다고 사용자가 쓰던 메시지가 날아가면 안 된다
+    -- keep what is typed: switching the language must not throw away the user's message
+    local edit_interval = GET_CHILD(frame, "edit_interval")
+    local edit_message = GET_CHILD(frame, "edit_message")
+    if edit_interval then
+        AUTO_CAST(edit_interval)
+        g.settings.interval = tonumber(edit_interval:GetText()) or g.settings.interval
     end
-    AA_open_frame()
+    if edit_message then
+        AUTO_CAST(edit_message)
+        g.settings.message = edit_message:GetText() or g.settings.message
+    end
+    AA_build_frame(frame)
+    AA_refresh_ui()
 end
 
 -- ============================================================
@@ -608,13 +811,13 @@ function AA_refresh_ui()
         local m = math.floor((elapsed % 3600) / 60)
         local s = elapsed % 60
         local elapsed_str = string.format("%02d:%02d:%02d", h, m, s)
-        lbl_status:SetText("{ol}{s14}{#00ff00}" .. string.format(AA_L("status_running"), elapsed_str))
+        lbl_status:SetText("{ol}{s13}{#00FF66}" .. string.format(AA_L("status_running"), elapsed_str))
     else
-        lbl_status:SetText("{ol}{s14}" .. AA_L("status_stopped"))
+        lbl_status:SetText("{ol}{s13}{#AAAAAA}" .. AA_L("status_stopped"))
     end
 
-    lbl_start_time:SetText("{ol}{s14}" .. string.format(AA_L("start_time"), g.start_time_str or "--:--:--"))
-    lbl_count:SetText("{ol}{s14}" .. string.format(AA_L("send_count"), g.shout_count or 0))
+    lbl_start_time:SetText("{ol}{s13}" .. string.format(AA_L("start_time"), g.start_time_str or "--:--:--"))
+    lbl_count:SetText("{ol}{s13}" .. string.format(AA_L("send_count"), g.shout_count or 0))
 
     local msg_type = g.settings and g.settings.msg_type or "/y"
     if msg_type == "/y" then
@@ -622,7 +825,7 @@ function AA_refresh_ui()
         pcall(function()
             megaphone_count = session.GetInvItemCountByType(645001) or 0
         end)
-        lbl_megaphone:SetText("{ol}{s14}" .. string.format(AA_L("megaphone_count"), megaphone_count))
+        lbl_megaphone:SetText("{ol}{s13}" .. string.format(AA_L("megaphone_count"), megaphone_count))
     else
         lbl_megaphone:SetText("")
     end
