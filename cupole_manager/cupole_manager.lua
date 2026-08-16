@@ -2,8 +2,9 @@
 -- v1.0.1 fix slot remap and speed up summon interval
 -- v1.0.2 add always-on-screen preset HUD (labeled toggle button + separate compact preset panel)
 -- v1.0.3 add a "made by" credit line with the guild emblem at the bottom of the preset window
+-- v1.0.4 rebuild the preset window: hand-drawn tabs, panelled regions, skinned scrollbar
 local addonName = "cupole_manager"
-local version = "1.0.3"
+local version = "1.0.4"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -413,7 +414,33 @@ local CM_UI_SKIN = "bg2"
 local CM_UI_ALPHA = 110
 -- 탭 판때기 색. 클라에 있는 탭 스킨: tab2(기본, 누런색) tab3 tab4 adventure_tab colony_tab
 -- tab plate skin; client tab skins: tab2 (default, the yellow one) tab3 tab4 adventure_tab colony_tab
-local CM_PRESET_TAB_SKIN = "tab3"
+-- 탭은 게임 tab 컨트롤 대신 직접 그린다. 활성/비활성을 배경 투명도로 구분해
+-- 창 전체 테마와 통일한다(활성=진함, 비활성=투명). 선택 상태는 컨트롤이 아니라
+-- g.cupole_preset_tab_index 가 들고 있다
+-- tabs are drawn by hand instead of the game tab control: active and inactive are told
+-- apart by background opacity, matching the rest of the window. the selection lives in
+-- g.cupole_preset_tab_index, not in a control
+-- 스크롤바. hideplayer 에서 인게임으로 확인한 값을 그대로 쓴다.
+-- 스킨을 안 주면 기본 스킨의 손잡이 폭이 트랙과 안 맞아 오른쪽으로 튀어나온다.
+-- x 는 클라가 쓰는 값이 항상 2 다(worldmap2_minimap:227, guide_quest:21, squad_manager:399 등).
+-- ⚠️ 위 여백을 주는 API 는 없다(SetScrollBarTopMargin 은 클라 전체에 0건, SetScrollBarOffset 의
+-- y 도 위 여백이 아니다) → 스크롤은 위아래로 줄인 안쪽 상자에 맡겨서 여백을 구조로 만든다
+-- scrollbar values carried over from hideplayer, verified in game. without an explicit skin the
+-- default thumb is wider than the track and hangs off the right edge; the client's x is always 2.
+-- there is no top-margin API (SetScrollBarTopMargin does not exist and SetScrollBarOffset's y is
+-- not one), so an inner box shrunk top and bottom owns the scrolling and makes the margin structural
+local CM_SCROLL_SKIN = "worldmap2_scrollbar"
+local CM_SCROLL_X = 2
+local CM_SCROLL_MARGIN = 4  -- 스크롤바 위아래 여백 / scrollbar inset
+local CM_TAB_COUNT = 10
+local CM_TAB_H = 26
+local CM_TAB_Y = 68
+local CM_TAB_SEP_W = 1
+local CM_TAB_ACTIVE_SKIN = "blackbox_op_80"
+local CM_TAB_IDLE_SKIN = "None"
+-- 각 구역을 창 배경보다 한 단계 어둡게 깔아 눈으로 구분되게 한다(hideplayer 와 같은 방식)
+-- each region sits a shade darker than the window so the areas read apart
+local CM_SECTION_SKIN = "blackbox_op_50"
 local CM_PRESET_SAVE_TEXT = "{ol}{s12}Save"
 
 -- ============================================================
@@ -571,6 +598,7 @@ local CM_PW = 560
 local CM_PH = 510
 local CM_PPAD = 20
 local CM_PINNER = CM_PW - CM_PPAD * 2
+local CM_PSEC_INSET = 6             -- 구역 패널 안쪽 여백 / padding inside a region panel
 local CM_PEDIT_INSET = 6            -- 입력 edit 이 박스 안으로 들어간 양 / how far the edit is inset
 -- 이름과 슬롯을 좌우 반반으로 나눈다 / name and slots share the row, split in half
 local CM_PHALF_GAP = 10
@@ -580,15 +608,81 @@ local CM_PSLOT_X = CM_PPAD + CM_PEDIT_INSET   -- 슬롯 열 시작 = 왼쪽 절�
 
 -- 섹션 머리글: HUD 라벨과 같은 white_16_ol 아웃라인 글꼴 + 아래 구분선(labelline)
 -- section header: the same outlined white_16_ol as the HUD label, with a divider under it
-function CM_preset_section(parent, name, x, y, w, text)
+-- 머리글 + 구분선 + 그 아래 구역 배경(높이를 주면). 배경을 먼저 깔아야 위 컨트롤이 가려지지 않는다
+-- header + divider + the region panel underneath (when a height is given).
+-- the panel is created first so later controls stay on top (creation order = z-order)
+function CM_preset_section(parent, name, x, y, w, text, body_h, no_line)
     local label = parent:CreateOrGetControl("richtext", name .. "_label", x, y, w, 20)
     AUTO_CAST(label)
     label:SetFontName("white_16_ol")
     label:SetText("{s14}" .. text)
     label:EnableHitTest(false)
-    local line = parent:CreateOrGetControl("labelline", name .. "_line", x, y + 20, w, 3)
-    AUTO_CAST(line)
-    line:SetSkinName("labelline2")
+    -- 바로 아래에 테두리 있는 목록이 오는 구역은 선이 겹쳐 보여서 생략한다
+    -- skip the divider where a bordered list follows right below, or the two lines stack
+    if not no_line then
+        local line = parent:CreateOrGetControl("labelline", name .. "_line", x, y + 20, w, 3)
+        AUTO_CAST(line)
+        line:SetSkinName("labelline2")
+    end
+    if body_h then
+        local body = parent:CreateOrGetControl("groupbox", name .. "_body", x, y + 25, w, body_h)
+        AUTO_CAST(body)
+        body:SetSkinName(CM_SECTION_SKIN)
+        body:EnableHittestGroupBox(false)
+    end
+end
+
+-- 현재 선택된 탭. 컨트롤이 없으므로 우리가 들고 있는 값이 진실이다
+-- the selected tab; with no tab control, our own value is the source of truth
+function CM_preset_tab_index()
+    return g.cupole_preset_tab_index or 0
+end
+
+-- 탭 스트립을 다시 그린다. 활성 탭만 배경을 진하게 주고 나머지는 투명하게 둔다.
+-- 탭 사이에는 얇은 세로 구분선을 넣는다
+-- redraw the strip: only the active tab gets a solid-ish background, the rest stay clear,
+-- with a thin vertical separator between them
+function CM_preset_tabs_render(frame)
+    local selected = CM_preset_tab_index()
+    local strip = frame:CreateOrGetControl("groupbox", "tab_strip", CM_PINNER, CM_TAB_H + 4, ui.LEFT, ui.TOP,
+        CM_PPAD, CM_TAB_Y - 2, 0, 0)
+    AUTO_CAST(strip)
+    strip:SetSkinName(CM_SECTION_SKIN)
+    strip:EnableHittestGroupBox(false)
+
+    local tab_w = math.floor((CM_PINNER - (CM_TAB_COUNT - 1) * CM_TAB_SEP_W) / CM_TAB_COUNT)
+    for i = 1, CM_TAB_COUNT do
+        local idx = i - 1
+        local tx = CM_PPAD + (i - 1) * (tab_w + CM_TAB_SEP_W)
+        local preset = g.cupole_manager_settings.presets[tostring(idx)]
+        local label = preset and preset.name and preset.name ~= "" and preset.name or ("Set " .. i)
+        local btn = frame:CreateOrGetControl("button", "tab_" .. i, tx, CM_TAB_Y, tab_w, CM_TAB_H)
+        AUTO_CAST(btn)
+        btn:SetSkinName((idx == selected) and CM_TAB_ACTIVE_SKIN or CM_TAB_IDLE_SKIN)
+        btn:SetText("{ol}{s12}" .. ((idx == selected) and label or ("{#AAAAAA}" .. label)))
+        btn:SetUserValue("TAB_INDEX", idx)
+        btn:SetEventScript(ui.LBUTTONUP, "CM_preset_tab_click")
+        btn:SetOverSound("button_over")
+        if i < CM_TAB_COUNT then
+            local sep = frame:CreateOrGetControl("picture", "tab_sep_" .. i, tx + tab_w, CM_TAB_Y + 4,
+                CM_TAB_SEP_W, CM_TAB_H - 8)
+            AUTO_CAST(sep)
+            sep:SetImage("fullblack")
+            sep:SetEnableStretch(1)
+            sep:EnableHitTest(0)
+        end
+    end
+end
+
+function CM_preset_tab_click(parent, ctrl)
+    local idx = ctrl:GetUserIValue("TAB_INDEX")
+    g.cupole_preset_tab_index = idx
+    local frame = ui.GetFrame(addonNameLower .. "_preset")
+    if not frame then
+        return
+    end
+    CM_preset_tabs_render(frame)
+    CM_preset_tab_change(frame)
 end
 
 function CM_preset_frame_open()
@@ -600,7 +694,9 @@ function CM_preset_frame_open()
     if frame and frame:IsVisible() == 1 then
         return
     end
-    frame = ui.CreateNewFrame("notice_on_pc", frame_name, 0, 0, 0, 0)
+    if not frame then
+        frame = ui.CreateNewFrame("notice_on_pc", frame_name, 0, 0, 0, 0)
+    end
     AUTO_CAST(frame)
     frame:RemoveAllChild()
     frame:Resize(CM_PW, CM_PH)
@@ -632,43 +728,45 @@ function CM_preset_frame_open()
     title:SetText("{@st43}{s22}Cupole Preset Setting{/}")
     title:EnableHitTest(false)
 
-    local close = frame:CreateOrGetControl("button", "close", 44, 44, ui.RIGHT, ui.TOP, 0, 20, 17, 0)
+    -- 제목과 본문을 가르는 구분선 (섹션 머리글과 같은 스킨으로 톤을 맞춘다)
+    -- divider under the title, same skin as the section headers
+    local title_line = frame:CreateOrGetControl("labelline", "title_line", CM_PPAD, 54, CM_PINNER, 3)
+    AUTO_CAST(title_line)
+    title_line:SetSkinName("labelline2")
+
+    -- 닫기 버튼은 제목 글자와 세로 중앙을 맞춘다(제목 18~48, 중앙 33).
+    -- 44px 이면 아래가 제목 구분선(54)에 닿아서 36px 로 줄였다
+    -- centre the close button on the title text (18~48, centre 33); at 44px its bottom
+    -- touched the title divider at 54, so it is 36px now
+    local close = frame:CreateOrGetControl("button", "close", 36, 36, ui.RIGHT, ui.TOP, 0, 15, 17, 0)
     AUTO_CAST(close)
     close:SetImage("testclose_button")
     close:SetEventScript(ui.LBUTTONUP, "CM_preset_frame_close")
 
-    local tab = frame:CreateOrGetControl("tab", "tab", CM_PINNER, 40, ui.LEFT, ui.TOP, CM_PPAD, 65, 0, 0)
-    AUTO_CAST(tab)
-    tab:SetEventScript(ui.LBUTTONUP, "CM_preset_tab_change")
-    tab:SetSkinName(CM_PRESET_TAB_SKIN)
-    for i = 1, 10 do
-        local preset = g.cupole_manager_settings.presets[tostring(i - 1)]
-        local tab_label = preset and preset.name and preset.name ~= "" and preset.name or ("Set " .. i)
-        tab:AddItem("{@st66b}{s14}" .. tab_label, true, "", "", "", "", "", false)
-    end
-    tab:SetItemsFixWidth(52)
-    tab:SetItemsAdjustFontSizeByWidth(52)
+    CM_preset_tabs_render(frame)
 
-    CM_preset_section(frame, "sec_slot", CM_PPAD, 112, CM_PHALF_W, "SLOTS")
+    CM_preset_section(frame, "sec_slot", CM_PPAD, 112, CM_PHALF_W, "SLOTS", 140)
 
     -- 투명 배경에선 edit 스킨(inventory_serch)이 배경에 묻히고 아래가 잘려 보였다.
     -- 클라 search_editbox 방식: 보이는 박스(groupbox)를 깔고 그 안에 skin 없는 edit 을 넣는다
     -- on a translucent background the edit skin blended in and looked clipped at the bottom;
     -- use the client's search_editbox shape: a visible box with a skinless edit inset in it
-    local name_bg = frame:CreateOrGetControl("groupbox", "name_bg", CM_PHALF_W, 28, ui.LEFT, ui.TOP, CM_PRIGHT_X, 138, 0,
-        0)
+    -- 구역 패널과 폭이 같으면 경계가 안 보인다. 안쪽으로 넣고 한 단계 더 진한 스킨을 준다
+    -- same width as the region panel means no visible edge: inset it and go a shade darker
+    local name_bg = frame:CreateOrGetControl("groupbox", "name_bg", CM_PHALF_W - CM_PSEC_INSET * 2, 28, ui.LEFT,
+        ui.TOP, CM_PRIGHT_X + CM_PSEC_INSET, 144, 0, 0)
     AUTO_CAST(name_bg)
-    name_bg:SetSkinName("test_weight_skin")
+    name_bg:SetSkinName("blackbox_op_80")
     name_bg:EnableHitTest(0)
 
-    local name_edit = frame:CreateOrGetControl("edit", "name_edit", CM_PRIGHT_X + CM_PEDIT_INSET, 143,
-        CM_PHALF_W - CM_PEDIT_INSET * 2, 20)
+    local name_edit = frame:CreateOrGetControl("edit", "name_edit", CM_PRIGHT_X + CM_PSEC_INSET + CM_PEDIT_INSET, 149,
+        CM_PHALF_W - (CM_PSEC_INSET + CM_PEDIT_INSET) * 2, 20)
     AUTO_CAST(name_edit)
     name_edit:SetSkinName("None")
     name_edit:SetFontName("white_14_ol")
     name_edit:SetTextAlign("left", "center")
 
-    CM_preset_section(frame, "sec_name", CM_PRIGHT_X, 112, CM_PHALF_W, "NAME")
+    CM_preset_section(frame, "sec_name", CM_PRIGHT_X, 112, CM_PHALF_W, "NAME", 140)
 
     local slot_positions = {[2] = 0, [1] = 1, [3] = 2}
     local slot_labels = {[1] = "Center", [2] = "Left", [3] = "Right"}
@@ -677,7 +775,11 @@ function CM_preset_frame_open()
     -- start the slot column on the same line as the name field's *text*: the edit is inset 6px
     -- inside its box, so the slots shift right by the same amount
     for slot = 1, 3 do
-        local sx = CM_PSLOT_X + slot_positions[slot] * 80
+        -- 슬롯 3칸(60px + 간격 20)을 구역 폭 안에서 가운데로 모은다
+        -- centre the three 60px slots (20px apart) inside the region
+        local slot_span = 3 * 60 + 2 * 20
+        local slot_x0 = CM_PPAD + math.floor((CM_PHALF_W - slot_span) / 2)
+        local sx = slot_x0 + slot_positions[slot] * 80
         local slot_label = frame:CreateOrGetControl("richtext", "slot_label_" .. slot, sx, 138, 60, 12)
         AUTO_CAST(slot_label)
         slot_label:SetText("{ol}{s11}{#aaaaaa}" .. slot_labels[slot])
@@ -716,11 +818,11 @@ function CM_preset_frame_open()
     -- "edit it" pair to the right edge of the name column; both bottoms land on 238
     local btn_gap = 8
     local btn_groups = {
-        {right = CM_PPAD + CM_PHALF_W, items = {
+        {right = CM_PPAD + CM_PHALF_W - CM_PSEC_INSET * 2, items = {
             {name = "apply_btn", w = 42, text = "{ol}{s12}Use", scp = "CM_preset_apply"},
             {name = "load_btn", w = 88, text = "{ol}{s12}Load Current", scp = "CM_preset_load_current"}
         }},
-        {right = CM_PRIGHT_X + CM_PHALF_W, items = {
+        {right = CM_PRIGHT_X + CM_PHALF_W - CM_PSEC_INSET, items = {
             {name = "save_btn", w = 42, text = CM_PRESET_SAVE_TEXT, scp = "CM_preset_save"},
             {name = "delete_btn", w = 42, text = "{ol}{s12}{#ff6666}Del", scp = "CM_preset_delete"}
         }}
@@ -750,7 +852,7 @@ function CM_preset_frame_open()
     AUTO_CAST(split_line)
     split_line:SetSkinName("labelline2")
 
-    CM_preset_section(frame, "sec_grid", CM_PPAD, 296, CM_PINNER, "OWNED CUPOLES")
+    CM_preset_section(frame, "sec_grid", CM_PPAD, 296, CM_PINNER, "OWNED CUPOLES", nil, true)
 
     -- 등급 필터도 같은 간격으로 오른쪽 정렬해 머리글 줄에 붙인다
     -- the grade filters share the header row, right-aligned with one gap
@@ -774,9 +876,27 @@ function CM_preset_frame_open()
     local grid = frame:CreateOrGetControl("groupbox", "cupole_grid", CM_PINNER, 155, ui.LEFT, ui.TOP, CM_PPAD, 322, 0,
         0)
     AUTO_CAST(grid)
-    grid:SetSkinName("downbox")
-    grid:EnableScrollBar(1)
+    grid:SetSkinName(CM_SECTION_SKIN)
+    grid:EnableScrollBar(0)
     grid:EnableHittestGroupBox(true)
+
+    -- 목록과 스크롤바는 안쪽 상자가 맡는다. 위아래로 CM_SCROLL_MARGIN 만큼 줄여 놓았으므로
+    -- 트랙이 그만큼 안으로 들어오고 위아래 여백이 같아진다. 테두리는 바깥 상자가 이미 그렸다
+    -- the inner box owns the list and the scrollbar; shrunk by CM_SCROLL_MARGIN top and bottom so
+    -- the track sits inset with matching margins. the outer box already drew the border
+    local grid_scroll = grid:CreateOrGetControl("groupbox", "cupole_grid_scroll", 0, CM_SCROLL_MARGIN,
+        CM_PINNER, 155 - CM_SCROLL_MARGIN * 2)
+    AUTO_CAST(grid_scroll)
+    grid_scroll:SetSkinName("None")
+    grid_scroll:EnableScrollBar(1)
+    grid_scroll:EnableHittestGroupBox(true)
+    -- 순서도 클라와 같게: 스킨을 먼저 정하고 나서 여백/오프셋을 준다.
+    -- 아래 여백은 안쪽 상자가 이미 만들었으므로 0
+    -- same order as the client: skin first, then margin and offset. the bottom margin already
+    -- comes from the inner box, so 0 here
+    grid_scroll:SetScrollBarSkinName(CM_SCROLL_SKIN)
+    grid_scroll:SetScrollBarBottomMargin(0)
+    grid_scroll:SetScrollBarOffset(CM_SCROLL_X, 0)
 
     g.cupole_preset_filter_grade = "All"
 
@@ -804,24 +924,30 @@ function CM_preset_frame_toggle()
     CM_preset_frame_open()
 end
 
+-- 창을 파괴하지 않고 숨긴다. 파괴/재생성은 즉시 사라지지만 show/hide 는 프레임 연출을 타서
+-- hideplayer 설정창과 여닫는 느낌이 같아진다
+-- hide instead of destroying: destroy/recreate pops instantly, while show/hide goes
+-- through the frame transition, matching how the hideplayer settings window opens
 function CM_preset_frame_close()
-    local frame_name = addonNameLower .. "_preset"
-    local frame = ui.GetFrame(frame_name)
+    local frame = ui.GetFrame(addonNameLower .. "_preset")
     if frame then
-        ui.DestroyFrame(frame_name)
+        frame:ShowWindow(0)
     end
 end
 
 function CM_preset_esc_check(frame)
+    -- 이제 창은 숨겨질 뿐 살아 있으므로 타이머도 계속 돈다. 보이는 동안만 반응한다
+    -- the frame now survives hidden, so this timer keeps ticking: only act while visible
+    if frame:IsVisible() ~= 1 then
+        return
+    end
     if keyboard.IsKeyPressed("ESCAPE") == 1 then
         CM_preset_frame_close()
     end
 end
 
 function CM_preset_tab_change(frame)
-    local tab = GET_CHILD(frame, "tab")
-    AUTO_CAST(tab)
-    local tab_index = tab:GetSelectItemIndex()
+    local tab_index = CM_preset_tab_index()
     local preset = g.cupole_manager_settings.presets[tostring(tab_index)]
 
     local name_edit = GET_CHILD(frame, "name_edit")
@@ -880,7 +1006,12 @@ function CM_preset_filter_click(parent, ctrl)
 end
 
 function CM_preset_render_grid(frame)
-    local grid = GET_CHILD(frame, "cupole_grid")
+    -- 스크롤 상자는 cupole_grid 의 자식이므로 GET_CHILD(비재귀)로는 못 찾는다
+    -- the scrolling box is a child of cupole_grid, so the non-recursive GET_CHILD misses it
+    local grid = GET_CHILD_RECURSIVELY(frame, "cupole_grid_scroll")
+    if grid == nil then
+        return
+    end
     AUTO_CAST(grid)
     grid:RemoveAllChild()
     local all_owned = CM_preset_get_owned_cupoles()
@@ -966,9 +1097,7 @@ end
 function CM_preset_slot_clear(parent, ctrl)
     local frame = ctrl:GetTopParentFrame()
     local slot_index = ctrl:GetUserIValue("SLOT_INDEX")
-    local tab = GET_CHILD(frame, "tab")
-    AUTO_CAST(tab)
-    local tab_index = tab:GetSelectItemIndex()
+    local tab_index = CM_preset_tab_index()
     local preset = g.cupole_manager_settings.presets[tostring(tab_index)]
     if preset and preset[tostring(slot_index)] then
         preset[tostring(slot_index)] = nil
@@ -978,9 +1107,7 @@ end
 
 function CM_preset_grid_click(parent, ctrl)
     local frame = ctrl:GetTopParentFrame()
-    local tab = GET_CHILD(frame, "tab")
-    AUTO_CAST(tab)
-    local tab_index = tab:GetSelectItemIndex()
+    local tab_index = CM_preset_tab_index()
     if not g.cupole_preset_selected_slot then
         if not g.cupole_manager_settings.presets[tostring(tab_index)] then
             g.cupole_manager_settings.presets[tostring(tab_index)] = {}
@@ -1001,9 +1128,7 @@ function CM_preset_grid_click(parent, ctrl)
         g.cupole_preset_selected_slot = target
     end
     local frame = ctrl:GetTopParentFrame()
-    local tab = GET_CHILD(frame, "tab")
-    AUTO_CAST(tab)
-    local tab_index = tab:GetSelectItemIndex()
+    local tab_index = CM_preset_tab_index()
     local cupole_index = ctrl:GetUserIValue("CUPOLE_INDEX")
     local cupole_name = ctrl:GetUserValue("CUPOLE_NAME")
 
@@ -1042,9 +1167,7 @@ function CM_preset_load_current(frame, ctrl)
             return
         end
     end
-    local tab = GET_CHILD(frame, "tab")
-    AUTO_CAST(tab)
-    local tab_index = tab:GetSelectItemIndex()
+    local tab_index = CM_preset_tab_index()
     if not g.cupole_manager_settings.presets[tostring(tab_index)] then
         g.cupole_manager_settings.presets[tostring(tab_index)] = {}
     end
@@ -1091,18 +1214,15 @@ function CM_preset_reopen_step(mf)
     local nf = ui.GetFrame(addonNameLower .. "_preset")
     if nf then
         nf:SetPos(st.x, st.y)
-        local ntab = GET_CHILD(nf, "tab")
-        AUTO_CAST(ntab)
-        ntab:SelectTab(st.index)
+        g.cupole_preset_tab_index = st.index
+        CM_preset_tabs_render(nf)
         CM_preset_tab_change(nf)
     end
     return 0
 end
 
 function CM_preset_save(frame, ctrl)
-    local tab = GET_CHILD(frame, "tab")
-    AUTO_CAST(tab)
-    local tab_index = tab:GetSelectItemIndex()
+    local tab_index = CM_preset_tab_index()
     if not g.cupole_manager_settings.presets[tostring(tab_index)] then
         g.cupole_manager_settings.presets[tostring(tab_index)] = {}
     end
@@ -1123,9 +1243,7 @@ end
 
 -- fully removes the preset (name + slots) from settings
 function CM_preset_delete(frame, ctrl)
-    local tab = GET_CHILD(frame, "tab")
-    AUTO_CAST(tab)
-    local tab_index = tab:GetSelectItemIndex()
+    local tab_index = CM_preset_tab_index()
     g.cupole_manager_settings.presets[tostring(tab_index)] = nil
     CM_save_settings()
     CM_hud_refresh()
@@ -1134,9 +1252,7 @@ function CM_preset_delete(frame, ctrl)
 end
 
 function CM_preset_apply(frame, ctrl)
-    local tab = GET_CHILD(frame, "tab")
-    AUTO_CAST(tab)
-    local tab_index = tab:GetSelectItemIndex()
+    local tab_index = CM_preset_tab_index()
     CM_preset_apply_by_index(tab_index)
 end
 
