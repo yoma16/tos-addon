@@ -57,7 +57,7 @@ tos-addon/
 > 배포는 GitHub Release 에셋(`.ipf`)으로만 합니다.
 
 ## Screenshot
-![alt text](image.png)
+![alt text](image-2.png)
 
 ---
 
@@ -102,7 +102,7 @@ An addon that automatically sends a specified message at regular intervals.
 3. 전송 주기(초)와 메시지 입력 (Enter interval and message)
 4. `시작/Start` 클릭 (Click Start)
 
-![alt text](image-1.png)
+![alt text](image-3.png)
 
 ## 저장 경로 / Save Path
 
