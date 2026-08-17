@@ -1445,8 +1445,18 @@ function CM_hud_create()
     end
     -- heal invalid / off-screen positions
     local sw, sh = CM_screen_size()
+    -- ⚠️ 상한을 `sw - 20` 으로 잡으면 안 된다. `ui.GetClientInitialWidth` 는 환경에 따라 실제 UI
+    -- 폭보다 작게 나오고(울트라와이드에서 실측 — convenient_hud 의 패널 보정 주석), 그러면 HUD 를
+    -- 오른쪽에 둔 사용자는 **맵을 옮길 때마다** 이 검사에 걸려 기본 위치로 되돌아갔다.
+    -- 이건 설정이 깨졌을 때만 걸리면 되는 안전망이다 — 사용자가 직접 옮긴 좌표를 의심하지 말 것.
+    -- math.max(...) 는 이 함수가 화면 크기를 아직 못 읽는 시점에 불려 0 이 나오는 경우도 막는다
+    -- ⚠️ never bound this by sw - 20: ui.GetClientInitialWidth can read narrower than the real UI
+    -- width, which made the guard fire on every map change and reset a right-hand HUD to default.
+    -- it is a safety net for corrupted settings, not a second opinion on where the user put it
+    local max_x = math.max(sw, 1920) * 2
+    local max_y = math.max(sh, 1080) * 2
     if type(hud.x) ~= "number" or type(hud.y) ~= "number" or
-        hud.x < 0 or hud.x > sw - 20 or hud.y < 0 or hud.y > sh - 20 then
+        hud.x < 0 or hud.x > max_x or hud.y < 0 or hud.y > max_y then
         CM_hud_default_pos(hud)
         CM_save_settings()
     end
