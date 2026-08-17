@@ -4,10 +4,10 @@
     "name": "Cupole manager",
     "file": "cupole_manager",
     "extension": "ipf",
-    "fileVersion": "v1.0.6",
-    "releaseTag": "cupole_preset_v1.0.6",
+    "fileVersion": "v1.0.7",
+    "releaseTag": "cupole_preset_v1.0.7",
     "unicode": "⛄",
-    "description": "큐폴 관리 애드온. 프리셋을 관리하고 쉽게 적용할 수 있습니다.<br> 변경이 완료되면 슬롯에 있는 큐폴 스킬도 맞춰서 변경해줍니다.<br> 마을에서는 화면에 뜨는 HUD로 저장된 프리셋을 바로 적용할 수 있습니다.<br> v1.0.6: 누를 수 있는 버튼과 아이콘에 마우스를 올리면 밝아집니다. 프리셋 창의 탭·슬롯·등급 필터·보유 큐폴 목록, HUD의 아이콘과 프리셋 줄까지 적용했습니다.<br> Cupole manager. You can manage cupole presets and apply them easily.<br> The Cupole skill in your slot changes to match as well.<br> In town, an on-screen HUD applies a saved preset in one click.<br> v1.0.6: clickable buttons and icons now brighten under the mouse — the preset window tabs, slots, grade filters and owned Cupole list, plus the HUD icons and preset rows.<br> クポル管理アドオン。プリセットを管理して簡単に適用できます。<br> 街では画面上のHUDから保存したプリセットをすぐ適用できます。<br> v1.0.6: クリックできるボタンとアイコンにマウスを乗せると明るくなります。プリセットウィンドウのタブ・スロット・等級フィルター・所持クポル一覧、HUDのアイコンとプリセット行に適用しました。",
+    "description": "큐폴 관리 애드온. 프리셋을 관리하고 쉽게 적용할 수 있습니다.<br> 변경이 완료되면 슬롯에 있는 큐폴 스킬도 맞춰서 변경해줍니다.<br> 마을에서는 화면에 뜨는 HUD로 저장된 프리셋을 바로 적용할 수 있습니다.<br> v1.0.7: 프리셋 창에서 Save를 누르면 창이 갱신되지 않고 그냥 닫히던 문제를 고쳤습니다. 이제 저장한 내용이 창에 바로 반영됩니다.<br> Cupole manager. You can manage cupole presets and apply them easily.<br> The Cupole skill in your slot changes to match as well.<br> In town, an on-screen HUD applies a saved preset in one click.<br> v1.0.7: fixed the preset window closing instead of refreshing when you press Save. What you saved now shows up in the window right away.<br> クポル管理アドオン。プリセットを管理して簡単に適用できます。<br> 街では画面上のHUDから保存したプリセットをすぐ適用できます。<br> v1.0.7: プリセットウィンドウでSaveを押すと更新されずにそのまま閉じてしまう問題を修正しました。保存した内容がすぐウィンドウに反映されます。",
     "tags": ["yomae", "cupole", "addons", "cupole manager", "cupole preset", "preset", "요매", "yoma16", "큐폴"]
   },
   {
