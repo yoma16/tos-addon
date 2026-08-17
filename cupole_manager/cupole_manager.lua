@@ -4,8 +4,9 @@
 -- v1.0.3 add a "made by" credit line with the guild emblem at the bottom of the preset window
 -- v1.0.4 rebuild the preset window: hand-drawn tabs, panelled regions, skinned scrollbar
 -- v1.0.5 bring the HUD back after the TP shop closes it (ui.CloseAllOpenedUI)
+-- v1.0.6 brighten clickable controls on mouse over
 local addonName = "cupole_manager"
-local version = "1.0.5"
+local version = "1.0.6"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -173,6 +174,71 @@ end
 --   ui.GetClientInitialWidth/Height = UI space, what SetPos/SetMargin use - use this for frames
 --   option.GetClientWidth/Height    = real screen pixels, for things like movie.PlayUIEffect
 -- switching to option once pushed the window to the bottom-right on a normal monitor
+-- ============================================================
+-- 마우스 오버 밝기 / hover highlight
+--   클라 기본 창은 xml 속성으로 처리한다: MouseOnAnim="btn_mouseover" MouseOffAnim="btn_mouseoff"
+--   (accountwarehouse.xml:19 등). 런타임에 만든 컨트롤에는 그 속성을 줄 수 없다 —
+--   `SetAnimation` 의 Lua 선례는 ingamealert.lua:38 의 openAnim/closeAnim 둘뿐이라
+--   "MouseOnAnim" 키가 통한다는 근거가 없다.
+--   대신 MOUSEON/MOUSEOFF 에 SetColorTone 을 건다 (picture 에 MOUSEON: job_select_guide.lua:98 /
+--   button 에 SetColorTone: tpitem.lua:3690)
+--   ⚠️ SetColorTone 은 곱연산이라 원색(FFFFFFFF)보다 밝게는 못 만든다. 평상시를 한 단계
+--   낮추고 오버에서 원색으로 되돌리는 방식이다
+--   ⚠️ groupbox 에 SetColorTone 을 쓰는 선례는 클라에 없다. 그래서 groupbox 를 눌러야 하는
+--   자리는 색을 자기 자신이 아니라 자식 picture 에 준다 (target 인자)
+--   the client does this with xml attributes we cannot set on runtime-made controls, so the
+--   tone rides on MOUSEON/MOUSEOFF. groupbox has no SetColorTone precedent, so a clickable
+--   groupbox tints a child picture instead
+-- ============================================================
+local CM_TONE_IDLE = "FFD2D2D2"
+local CM_TONE_HOVER = "FFFFFFFF"
+
+local function CM_hover_apply(ctrl, key)
+    if ctrl == nil then
+        return
+    end
+    local tone = ctrl:GetUserValue(key)
+    -- 값이 없는 UserValue 는 "None" 을 돌려준다 / an unset user value reads back as "None"
+    if tone == nil or tone == "" or tone == "None" then
+        return
+    end
+    local target = ctrl:GetUserValue("CM_TONE_TARGET")
+    if target ~= nil and target ~= "" and target ~= "None" then
+        local child = GET_CHILD_RECURSIVELY(ctrl, target)
+        if child ~= nil then
+            AUTO_CAST(child)
+            child:SetColorTone(tone)
+            return
+        end
+    end
+    ctrl:SetColorTone(tone)
+end
+
+function CM_HOVER_ON(frame, ctrl)
+    CM_hover_apply(ctrl, "CM_TONE_HOVER")
+end
+
+function CM_HOVER_OFF(frame, ctrl)
+    CM_hover_apply(ctrl, "CM_TONE_IDLE")
+end
+
+-- target 은 색을 입힐 자식 이름(없으면 컨트롤 자신) / target names the child to tint, if any
+local function CM_hover(ctrl, target, idle, hover)
+    if ctrl == nil then
+        return
+    end
+    idle = idle or CM_TONE_IDLE
+    hover = hover or CM_TONE_HOVER
+    ctrl:SetUserValue("CM_TONE_IDLE", idle)
+    ctrl:SetUserValue("CM_TONE_HOVER", hover)
+    if target ~= nil then
+        ctrl:SetUserValue("CM_TONE_TARGET", target)
+    end
+    CM_hover_apply(ctrl, "CM_TONE_IDLE")
+    ctrl:SetEventScript(ui.MOUSEON, "CM_HOVER_ON")
+    ctrl:SetEventScript(ui.MOUSEOFF, "CM_HOVER_OFF")
+end
+
 local function CM_screen_size()
     return ui.GetClientInitialWidth(), ui.GetClientInitialHeight()
 end
@@ -518,6 +584,7 @@ function CM_credit_render(parent, parent_w, y, pad)
     -- only the picture takes the click: there is no client precedent for SetEventScript on a
     -- runtime-created richtext and it did not fire in game; pictures are proven (the HUD icon)
     emblem:EnableHitTest(true)
+    CM_hover(emblem)
     emblem:SetEventScript(ui.LBUTTONUP, "CM_credit_whisper")
     emblem:SetTextTooltip(tip)
 
@@ -672,6 +739,7 @@ function CM_preset_tabs_render(frame)
         btn:SetSkinName((idx == selected) and CM_TAB_ACTIVE_SKIN or CM_TAB_IDLE_SKIN)
         btn:SetText("{ol}{s12}" .. ((idx == selected) and label or ("{#AAAAAA}" .. label)))
         btn:SetUserValue("TAB_INDEX", idx)
+        CM_hover(btn)
         btn:SetEventScript(ui.LBUTTONUP, "CM_preset_tab_click")
         btn:SetOverSound("button_over")
         if i < CM_TAB_COUNT then
@@ -752,6 +820,7 @@ function CM_preset_frame_open()
     local close = frame:CreateOrGetControl("button", "close", 36, 36, ui.RIGHT, ui.TOP, 0, 15, 17, 0)
     AUTO_CAST(close)
     close:SetImage("testclose_button")
+    CM_hover(close)
     close:SetEventScript(ui.LBUTTONUP, "CM_preset_frame_close")
 
     CM_preset_tabs_render(frame)
@@ -804,6 +873,7 @@ function CM_preset_frame_open()
         AUTO_CAST(pic)
         pic:SetSkinName("inven_slot")
         pic:SetUserValue("SLOT_INDEX", slot)
+        CM_hover(pic)
         pic:SetEventScript(ui.LBUTTONUP, "CM_preset_slot_click")
         pic:SetEventScript(ui.RBUTTONUP, "CM_preset_slot_clear")
         local slot_name = frame:CreateOrGetControl("richtext", "slot_name_" .. slot, sx, 218, 60, 20)
@@ -852,6 +922,7 @@ function CM_preset_frame_open()
             btn:SetText(item.text)
             btn:SetOverSound("button_over")
             btn:SetClickSound("button_click_stats")
+            CM_hover(btn)
             btn:SetEventScript(ui.LBUTTONUP, item.scp)
             bx = bx + item.w + btn_gap
         end
@@ -876,6 +947,7 @@ function CM_preset_frame_open()
         local grade_colors = {All = "ffffff", UR = "ffcc33", SR = "cc66ff", R = "66ccff"}
         fbtn:SetText("{ol}{s12}{#" .. grade_colors[grade] .. "}" .. grade)
         fbtn:SetUserValue("FILTER_GRADE", grade)
+        CM_hover(fbtn)
         fbtn:SetEventScript(ui.LBUTTONUP, "CM_preset_filter_click")
         fbtn:SetOverSound("button_over")
         fbtn:SetClickSound("button_click_stats")
@@ -1058,6 +1130,11 @@ function CM_preset_render_grid(frame)
             pic:SetEnableStretch(1)
         end
         pic:EnableHitTest(0)
+        -- ⚠️ 색을 입힐 자식(icon_i)이 만들어진 뒤에 걸어야 한다. 앞에 두면 자식을 못 찾아
+        -- groupbox 자신에게 SetColorTone 이 들어가는데, 그건 클라에 선례가 없는 호출이다
+        -- ⚠️ attach after the child exists: before it, the lookup fails and the tone would land
+        -- on the groupbox itself, which has no precedent in the client
+        CM_hover(cell, "icon_" .. i)
 
         local name_rt = cell:CreateOrGetControl("richtext", "name_" .. i, 0, 54, cell_w - 4, 16)
         AUTO_CAST(name_rt)
@@ -1499,6 +1576,7 @@ function CM_hud_create()
     gear:EnableHitTest(1)
     gear:SetTextTooltip(g.lang == "kr" and "{ol}쿠폴 프리셋 설정" or
                             (g.lang == "Japanese" and "{ol}クポルプリセット設定" or "{ol}Cupole preset settings"))
+    CM_hover(gear)
     gear:SetEventScript(ui.LBUTTONUP, "CM_preset_frame_toggle")
 
     -- clickable toggle icon on the RIGHT, vertically centered: a PICTURE (not a
@@ -1511,6 +1589,7 @@ function CM_hud_create()
     icon:SetEnableStretch(1)
     icon:EnableHitTest(1)
     icon:SetTextTooltip(g.lang == "Japanese" and "{ol}クポルプリセット 開閉" or "{ol}Toggle Cupole presets")
+    CM_hover(icon)
     icon:SetEventScript(ui.LBUTTONUP, "CM_hud_toggle")
 
     CM_hud_set_toggle_visual(frame, hud.open)
@@ -1572,6 +1651,7 @@ function CM_hud_panel_render()
             AUTO_CAST(rb)
             rb:SetText("{ol}{s14}" .. row.label)
             rb:SetUserValue("PRESET_INDEX", row.idx)
+            CM_hover(rb)
             rb:SetEventScript(ui.LBUTTONUP, "CM_hud_apply")
             rb:SetOverSound("button_over")
             rb:SetClickSound("button_click_stats")
