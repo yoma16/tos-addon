@@ -3,8 +3,9 @@
 -- v1.0.2 add always-on-screen preset HUD (labeled toggle button + separate compact preset panel)
 -- v1.0.3 add a "made by" credit line with the guild emblem at the bottom of the preset window
 -- v1.0.4 rebuild the preset window: hand-drawn tabs, panelled regions, skinned scrollbar
+-- v1.0.5 bring the HUD back after the TP shop closes it (ui.CloseAllOpenedUI)
 local addonName = "cupole_manager"
-local version = "1.0.4"
+local version = "1.0.5"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -201,6 +202,16 @@ function CM_GAME_START()
     else
         CM_hud_destroy()
     end
+    -- TP 상점이 닫아버린 HUD 를 되살리는 감시. 등록은 한 번만 한다
+    -- (GAME_START_3SEC 는 캐릭터 입장마다 오므로 매번 RegisterMsg 하면 중복 등록된다)
+    -- watch that restores a HUD the TP shop closed; registered once, since GAME_START_3SEC
+    -- fires on every character entry
+    if not g.hud_guard_on then
+        g.hud_guard_on = true
+        g.addon:RegisterMsg("ESCAPE_PRESSED", "CM_hud_guard")
+    end
+    g.frame:StopUpdateScript("CM_hud_guard_tick")
+    g.frame:RunUpdateScript("CM_hud_guard_tick", 2.0)
 end
 
 -- ============================================================
@@ -1385,6 +1396,34 @@ function CM_hud_destroy()
             ui.DestroyFrame(name)
         end
     end
+end
+
+-- 🔑 TP 상점을 열면 클라가 `ui.CloseAllOpenedUI()` 로 우리 HUD 까지 닫는다(tpitem.lua:505).
+-- 상점을 닫을 때 부르는 `ui.OpenAllClosedUI()`(tpitem.lua:953)는 **애드온이 런타임에
+-- ui.CreateNewFrame 으로 만든 프레임은 되살려주지 않아서** HUD 가 사라진 채 남았다.
+-- 게임이 되돌려주기를 기대하지 말고 스스로 다시 세운다 (nexus indun_panel 도 ESCAPE_PRESSED
+-- 로 같은 일을 한다). 프레임이 통째로 없을 수 있으므로 생성 경로를 다시 탄다
+-- 🔑 the TP shop closes our HUD via ui.CloseAllOpenedUI, and the matching OpenAllClosedUI does
+-- not restore frames an addon created at runtime, so we rebuild it ourselves
+function CM_hud_guard()
+    if not g.cupole_manager_settings then
+        return
+    end
+    -- HUD 는 도시에서만 존재한다. 도시가 아니면 없는 게 정상이다 / town only, by design
+    if CM_get_map_type() ~= "City" then
+        return
+    end
+    local frame = ui.GetFrame(addonNameLower .. "_hud")
+    if not frame or frame:IsVisible() == 0 then
+        CM_hud_create()
+    end
+end
+
+-- 타이머와 ESC 양쪽에 건다. 상점을 ESC 로 닫든 X 로 닫든 늦어도 2초 안에 돌아온다
+-- both a timer and ESC, so either way of closing the shop brings it back within 2s
+function CM_hud_guard_tick(frame)
+    CM_hud_guard()
+    return 1
 end
 
 -- creates the always-visible toggle button frame (idempotent)
