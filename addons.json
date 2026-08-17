@@ -42,5 +42,27 @@
     "unicode": "⛄",
     "description": "일반메시지, 외침, 길드메시지를 특정 주기에 맞춰 발송하게 하는 애드온. <br>v1.1.0: 설정창을 다른 애드온과 같은 반투명 테마로 다시 만들었습니다. 채널·설정·상태를 구역으로 나누고, 선택한 채널은 게임 채팅창의 채널 색 그대로 표시합니다. 창을 닫아도 파괴하지 않고 숨기며, 창이 닫힌 상태에서 ESC를 눌렀을 때 실행 중인 자동 전송이 멈추던 문제를 고쳤습니다. KOR/ENG를 바꿔도 입력하던 주기와 메시지가 유지됩니다. <br>메시지는 최소 10초마다, 외침은 10분마다, 길드메시지는 10분마다 발송됩니다. <br>Auto ads. It sends message, shout, guild message in specific period. <br>v1.1.0: the window was rebuilt with the same translucent theme as the other addons. Channel, settings and status are separate regions, and the selected channel is shown in the game's own chat channel colour. Closing the window hides it instead of destroying it, and pressing ESC while the window is closed no longer stops a running broadcast. Switching KOR/ENG keeps the interval and message you were typing. <br>Message will be sent every 10 seconds at least, shout will be sent every 10 minutes.",
     "tags": ["yomae", "auto_ads", "yoma16", "요매"]
+  },
+  {
+    "tosversion" : "20260817",
+    "name": "Auto Keeper",
+    "file": "auto_keeper",
+    "extension": "ipf",
+    "fileVersion": "v1.0.0",
+    "releaseTag": "auto_keeper_v1.0.0",
+    "unicode": "⛄",
+    "description": "자동 관리 HUD. 스태미나 알약 자동 섭취, 물약 회복 버프 자동 해제, 성물 마력 보완 충전, 장비 자동 수리 네 가지를 HUD 아이콘으로 각각 켜고 끕니다. 아이콘을 누르면 켜짐/꺼짐이 색으로 바뀌고, 수리 아이콘을 우클릭하면 설정창이 열립니다. HUD는 드래그로 옮기면 위치가 저장되고 /keeper 로 표시를 켜고 끕니다.<br> v1.0.0: 스태미나는 최대치의 20% 이하에서 알약을 하나씩 먹고 도시와 이벤트 맵에서는 동작하지 않습니다. 물약 회복 버프는 체력이 40% 이상이 되면 해제합니다. 성물은 던전 입장창에서 마력이 덜 찼을 때 엑토나이트로 채웁니다. 장비는 내구도가 30% 미만이면 긴급 수리 키트로 수리하고, 부족하면 필요한 수량만큼만 자동으로 구매합니다(설정창에서 켜야 동작).<br> ⚠️ autostamina, no_potion 애드온과 Nexus Addons의 Auto Repair, mini_addons의 성물 자동충전은 반드시 꺼 주세요. 같은 동작이 두 번 돌아 아이템을 이중으로 소모합니다.<br> Auto Keeper. Four chores on one HUD bar, each toggled by its own icon: stamina pills, removing the potion heal buff, topping up relic power, and repairing gear. Click an icon to switch it on or off, right click the repair icon for its settings, drag the bar to move it, and use /keeper to show or hide it.<br> v1.0.0: stamina eats one pill at a time below 20% and does nothing in cities or event maps. The potion heal buff is removed once HP is back at 40% or above. Relic power is filled with Ectonite at the dungeon entry window. Gear below 30% durability is repaired with emergency repair kits, buying only as many as the repair needs when you run short (auto-buy must be switched on in the settings).<br> ⚠️ Turn off the autostamina and no_potion addons, Auto Repair in Nexus Addons, and the relic auto charge in mini_addons — two copies of the same job burn twice the items.<br> 自動管理HUD。スタミナ丸薬の自動使用、回復ポーションバフの自動解除、レリック魔力の補完チャージ、装備の自動修理の4つをHUDアイコンで個別にオン/オフします。アイコンをクリックすると色で状態が変わり、修理アイコンを右クリックすると設定ウィンドウが開きます。HUDはドラッグで移動でき位置が保存され、/keeper で表示を切り替えます。<br> v1.0.0: スタミナは最大値の20%以下で丸薬を1個ずつ使い、街とイベントマップでは動作しません。回復ポーションバフはHPが40%以上になると解除します。レリックはダンジョン入場画面で魔力が満タンでなければエクトナイトで補充します。装備は耐久度が30%未満なら緊急修理キットで修理し、足りなければ必要な数だけ自動購入します(設定でオンにした場合のみ)。<br> ⚠️ autostamina・no_potionアドオン、Nexus AddonsのAuto Repair、mini_addonsのレリック自動チャージは必ずオフにしてください。同じ動作が二重に走りアイテムを余計に消費します。",
+    "tags": ["yomae", "auto_keeper", "stamina", "repair", "relic", "yoma16", "요매", "자동"]
+  },
+  {
+    "tosversion" : "20260817",
+    "name": "Convenient HUD",
+    "file": "convenient_hud",
+    "extension": "ipf",
+    "fileVersion": "v1.0.0",
+    "releaseTag": "convenient_hud_v1.0.0",
+    "unicode": "⛄",
+    "description": "편의 설정 HUD. 자주 바꾸는 설정 5가지(다른 캐릭터 이펙트 보기, 큐폴 자동 물약, 내 이펙트·다른 캐릭터·보스 몬스터 선명도)를 설정창을 열지 않고 화면에서 바로 전환합니다. HUD는 드래그로 옮기면 위치가 저장됩니다.<br> v1.0.0: 값을 저장하지 않고 패널을 열 때마다 클라이언트의 현재 값을 읽어 보여줍니다. 다른 애드온도 같은 설정을 건드리기 때문에, 사본을 들고 있다가 다시 적용하면 서로 덮어쓰게 되기 때문입니다. 선명도는 10/25/50/75/100% 다섯 단계이고 지금 값과 정확히 같을 때만 강조 표시합니다.<br> Convenient HUD. Flip five frequently-changed settings in place — other players' effects, cupole auto potion, and the clarity of your own, other players' and boss effects — without opening the option window. Drag the bar to move it and the position is saved.<br> v1.0.0: nothing is stored. The panel reads the client's live values every time it opens, because other addons write the same settings and a private copy would just fight over who writes last. Clarity has five steps (10/25/50/75/100%) and a step is highlighted only when it matches the current value exactly.<br> 便利設定HUD。よく変える設定5つ(他キャラのエフェクト表示、クポル自動ポーション、自分・他キャラ・ボスモンスターのエフェクト鮮明度)を設定ウィンドウを開かずにその場で切り替えます。HUDはドラッグで移動でき位置が保存されます。<br> v1.0.0: 値は保存せず、パネルを開くたびにクライアントの現在値を読んで表示します。他のアドオンも同じ設定を書き換えるため、コピーを持って再適用すると上書き合戦になるからです。鮮明度は10/25/50/75/100%の5段階で、現在値と完全に一致する時だけ強調表示します。",
+    "tags": ["yomae", "convenient_hud", "option", "effect", "yoma16", "요매", "편의"]
   }
 ]
