@@ -5,8 +5,9 @@
 -- v1.0.4 rebuild the preset window: hand-drawn tabs, panelled regions, skinned scrollbar
 -- v1.0.5 bring the HUD back after the TP shop closes it (ui.CloseAllOpenedUI)
 -- v1.0.6 brighten clickable controls on mouse over
+-- v1.0.7 fix the preset window closing instead of refreshing after Save
 local addonName = "cupole_manager"
-local version = "1.0.6"
+local version = "1.0.7"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -764,13 +765,15 @@ function CM_preset_tab_click(parent, ctrl)
     CM_preset_tab_change(frame)
 end
 
-function CM_preset_frame_open()
+-- force 를 주면 이미 보이는 창도 다시 그린다. 저장/삭제 후 내용을 갱신할 때 쓴다
+-- with force, a window that is already visible is rebuilt in place (used after save/delete)
+function CM_preset_frame_open(force)
     if not g.cupole_manager_settings then
         CM_load_settings()
     end
     local frame_name = addonNameLower .. "_preset"
     local frame = ui.GetFrame(frame_name)
-    if frame and frame:IsVisible() == 1 then
+    if not force and frame and frame:IsVisible() == 1 then
         return
     end
     if not frame then
@@ -1277,36 +1280,27 @@ end
 -- must close on one tick and reopen on the next -- recreating in the same event
 -- lets the pending destroy clobber the new frame (window just closes). Driven
 -- by the always-alive main "cupole_manager" frame.
+-- 저장/삭제 뒤 창 내용을 갱신한다. **제자리에서 다시 그린다.**
+-- 🐛 v1.0.4 회귀: 예전에는 "닫았다가 0.02초 뒤 다시 연다"를 타이머로 했다. 그때는
+-- CM_preset_frame_close() 가 ui.DestroyFrame 이라 프레임이 실제로 사라졌기 때문에 성립했다.
+-- v1.0.4 에서 close 를 ShowWindow(0) 으로 바꾸면서(파괴 대신 숨김) 이 전제가 깨졌다 —
+-- 숨김 연출이 0.02초 안에 안 끝나면 다시 여는 쪽의 `IsVisible() == 1` 조기 리턴에 걸려
+-- 아무것도 안 하고 끝나고, 창은 그대로 닫힌 채 남았다(저장 누르면 창이 그냥 닫히는 증상).
+-- 숨겼다 여는 왕복 자체가 이제 불필요하므로 없앴다. 타이밍에 기대는 코드가 사라졌다.
+-- 🐛 v1.0.4 regression: this used to hide the frame and reopen it a tick later, which worked
+-- only while close() destroyed the frame. once close() became ShowWindow(0), a hide that had
+-- not finished within 0.02s made the reopen hit its "already visible" early return and do
+-- nothing - the window just stayed shut. rebuilding in place removes the race entirely
 function CM_preset_reopen(frame, tab_index)
-    g.cupole_preset_reopen = { index = tab_index, x = frame:GetX(), y = frame:GetY(), phase = 0 }
-    local mf = ui.GetFrame("cupole_manager")
-    if mf then
-        mf:RunUpdateScript("CM_preset_reopen_step", 0.02)
-    end
-end
-
-function CM_preset_reopen_step(mf)
-    local st = g.cupole_preset_reopen
-    if not st then
-        mf:StopUpdateScript("CM_preset_reopen_step")
-        return 0
-    end
-    if st.phase == 0 then
-        CM_preset_frame_close()   -- queue destroy of the old frame
-        st.phase = 1
-        return 1                  -- wait one tick for the destroy to flush
-    end
-    mf:StopUpdateScript("CM_preset_reopen_step")
-    g.cupole_preset_reopen = nil
-    CM_preset_frame_open()
+    local x, y = frame:GetX(), frame:GetY()
+    CM_preset_frame_open(true)
     local nf = ui.GetFrame(addonNameLower .. "_preset")
     if nf then
-        nf:SetPos(st.x, st.y)
-        g.cupole_preset_tab_index = st.index
+        nf:SetPos(x, y)
+        g.cupole_preset_tab_index = tab_index
         CM_preset_tabs_render(nf)
         CM_preset_tab_change(nf)
     end
-    return 0
 end
 
 function CM_preset_save(frame, ctrl)
