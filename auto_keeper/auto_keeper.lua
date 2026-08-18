@@ -5,8 +5,13 @@
 --   `.claude/docs/changelog-2026-08-17-auto-keeper.md` 참고
 --   four upkeep automations, each toggled by its own HUD icon. these are reimplementations of
 --   autostamina / no_potion / nexus auto_repair / mini_addons rp_charge with their defects fixed
+-- v1.1.0 바카리네 장비 탈착(다섯 번째 아이콘) 추가.
+--   nexus 의 vakarine_equip 을 옮겨오면서 무한 재시도·비결정 순서·중복 등록·피격마다 전 장비
+--   스캔을 전부 고쳤다. 근거는 §5 주석과 `.claude/docs/changelog-2026-08-18-vakarine-equip.md`
+--   ported from nexus vakarine_equip, with its unbounded retries, nondeterministic ordering,
+--   duplicate message registration and per-hit equipment scan all fixed
 local addonName = "auto_keeper"
-local version = "1.0.0"
+local version = "1.1.0"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -51,6 +56,32 @@ local AK_LANG = {
         cfg_autobuy_tip = "{ol}내구도가 닳았을 때 필요한 수량만큼 확인 없이 바로 구매합니다",
         cfg_qty = "1회 최대 구매 수량",
         tip_rclick = "{ol}{#FFDD55}우클릭 : 설정",
+        f_vakarine = "바카리네 장비 탈착",
+        tip_vakarine = "{ol}선택한 장비를 벗었다가 다시 낍니다{nl}{#FFDD55}좌클릭 : 지금 실행{nl}우클릭 : 자동 실행 / 설정",
+        vk_title = "바카리네 장비 탈착",
+        vk_sec_run = "동작",
+        vk_sec_slots = "탈착할 장비",
+        vk_auto = "맵 진입 시 자동 실행",
+        vk_auto_tip = "{ol}인스턴스 던전에 들어가면 자동으로 탈착합니다{nl}바카리네 축복 5세트를 착용했을 때만 작동합니다{nl}이 설정은 캐릭터별로 저장됩니다",
+        vk_jsr = "주간 보스 레이드에서도",
+        vk_jsr_tip = "{ol}JSR(보스 협동전) = 주간 보스 레이드 맵 8종{nl}일반 인스턴스 던전은 이 설정과 무관하게 작동합니다",
+        vk_hp = "체력바에 상태 표시",
+        -- ⚠️ 이 문자열은 SetTextTooltip 으로 **그대로** 넘어간다(string.format 을 타지 않는다).
+        -- %% 로 이스케이프하면 화면에 %% 가 그대로 찍힌다. tip_stamina 류만 format 을 탄다
+        -- ⚠️ passed straight to SetTextTooltip, so %% would render literally as %%
+        vk_hp_tip = "{ol}체력바 위에 HP % 와 완벽/복수 표시를 띄웁니다{nl}복수 기준은 바카리네 5세트면 45%, 아니면 35% 입니다",
+        hp_perfect = "완벽",
+        hp_revenge = "복수",
+        vk_all = "전체 선택 / 해제",
+        vk_menu_cfg = "설정",
+        vk_slot_tip = "{ol}눌러서 켜고 끕니다. 켜진 부위만 탈착합니다",
+        vk_run = "[Auto Keeper] 장비를 다시 착용합니다.",
+        vk_done = "[Auto Keeper] 장비 탈착 완료.",
+        vk_stuck = "[Auto Keeper] 장비 탈착이 진행되지 않아 중단했습니다.",
+        vk_none = "[Auto Keeper] 탈착할 장비가 없습니다. 아이콘 우클릭 → 설정에서 부위를 고르세요.",
+        vk_busy = "[Auto Keeper] 이미 탈착이 진행 중입니다.",
+        vk_nexus = "[Auto Keeper] nexus 의 vakarine_equip 이 켜져 있습니다. 탈착이 두 번 걸리니 nexus 설정에서 꺼주세요.",
+        vk_import = "[Auto Keeper] nexus 의 vakarine_equip 에서 탈착 부위 설정을 가져왔습니다.",
     },
     jp = {
         loaded = "[Auto Keeper] ロード完了。/keeper で HUD の表示を切り替えます。",
@@ -80,6 +111,29 @@ local AK_LANG = {
         cfg_autobuy_tip = "{ol}耐久度が減った時に必要な数だけ確認なしで購入します",
         cfg_qty = "1回の最大購入数",
         tip_rclick = "{ol}{#FFDD55}右クリック : 設定",
+        f_vakarine = "バカリネ装備の付け外し",
+        tip_vakarine = "{ol}選んだ装備を外して付け直します{nl}{#FFDD55}左クリック : 今すぐ実行{nl}右クリック : 自動実行 / 設定",
+        vk_title = "バカリネ装備の付け外し",
+        vk_sec_run = "動作",
+        vk_sec_slots = "付け外しする装備",
+        vk_auto = "マップ入場時に自動実行",
+        vk_auto_tip = "{ol}インスタンスダンジョンに入ると自動で付け外しします{nl}バカリネの祝福5セット装備時のみ作動します{nl}この設定はキャラクターごとに保存されます",
+        vk_jsr = "週間ボスレイドでも",
+        vk_jsr_tip = "{ol}JSR(ボス協同戦) = 週間ボスレイドのマップ8種{nl}通常のインスタンスダンジョンはこの設定に関係なく作動します",
+        vk_hp = "HPバーに状態を表示",
+        vk_hp_tip = "{ol}HPバーの上に HP % と Perfect / Revenge を表示します{nl}Revenge の基準は5セットなら45%、それ以外は35% です",
+        hp_perfect = "Perfect",
+        hp_revenge = "Revenge",
+        vk_all = "全選択 / 全解除",
+        vk_menu_cfg = "設定",
+        vk_slot_tip = "{ol}押してオン/オフします。オンの部位だけ付け外しします",
+        vk_run = "[Auto Keeper] 装備を付け直します。",
+        vk_done = "[Auto Keeper] 付け外し完了。",
+        vk_stuck = "[Auto Keeper] 付け外しが進まないため中断しました。",
+        vk_none = "[Auto Keeper] 付け外しする装備がありません。アイコン右クリック → 設定で部位を選んでください。",
+        vk_busy = "[Auto Keeper] すでに付け外しが進行中です。",
+        vk_nexus = "[Auto Keeper] nexus の vakarine_equip がオンです。二重に作動するので nexus 側をオフにしてください。",
+        vk_import = "[Auto Keeper] nexus の vakarine_equip から部位設定を取り込みました。",
     },
     en = {
         loaded = "[Auto Keeper] Loaded. Use /keeper to show or hide the HUD.",
@@ -109,6 +163,29 @@ local AK_LANG = {
         cfg_autobuy_tip = "{ol}Buys exactly what a repair needs, without a confirmation",
         cfg_qty = "Max per purchase",
         tip_rclick = "{ol}{#FFDD55}Right click: settings",
+        f_vakarine = "Vakarine gear re-equip",
+        tip_vakarine = "{ol}Takes the selected gear off and puts it back on{nl}{#FFDD55}Left click: run now{nl}Right click: auto run / settings",
+        vk_title = "Vakarine gear re-equip",
+        vk_sec_run = "Behaviour",
+        vk_sec_slots = "Gear to swap",
+        vk_auto = "Run on map entry",
+        vk_auto_tip = "{ol}Runs automatically when you enter an instance dungeon{nl}Only while the 5-piece Vakarine blessing set is worn{nl}This setting is saved per character",
+        vk_jsr = "Weekly boss raids too",
+        vk_jsr_tip = "{ol}JSR (boss co-op) = the 8 weekly boss raid maps{nl}Regular instance dungeons run regardless of this",
+        vk_hp = "Show status on the HP bar",
+        vk_hp_tip = "{ol}Draws HP % and Perfect / Revenge above the HP bar{nl}Revenge triggers at 45% with the 5-piece set, 35% without it",
+        hp_perfect = "Perfect",
+        hp_revenge = "Revenge",
+        vk_all = "Select / clear all",
+        vk_menu_cfg = "Settings",
+        vk_slot_tip = "{ol}Click to toggle. Only lit slots are swapped",
+        vk_run = "[Auto Keeper] Re-equipping gear.",
+        vk_done = "[Auto Keeper] Gear swap done.",
+        vk_stuck = "[Auto Keeper] The gear swap stopped making progress and was aborted.",
+        vk_none = "[Auto Keeper] Nothing to swap. Right click the icon and pick some slots in the settings.",
+        vk_busy = "[Auto Keeper] A gear swap is already running.",
+        vk_nexus = "[Auto Keeper] nexus vakarine_equip is enabled. It will swap twice - please turn it off in nexus.",
+        vk_import = "[Auto Keeper] Imported the slot selection from nexus vakarine_equip.",
     }
 }
 
@@ -140,6 +217,11 @@ local AK_STA_RATIO = 0.20
 -- ⚠️ this condition was right all along - the breakage was the "only with the 5-piece Vakarine
 -- set" gate stacked on top of it, which went quietly false whenever raid gear was swapped
 local AK_HP_RATIO = 0.40
+-- 기준선을 넘는 순간을 얼마나 빨리 잡는가. 버프 메시지는 그 순간에 오지 않으므로
+-- 실질적인 주 경로는 이 타이머다. 사용자 요청으로 1.0 → 0.5 (2026-08-18)
+-- how fast the crossing is caught: no buff message arrives at that moment, so this timer is the
+-- real primary path. 1.0 -> 0.5 at the user's request
+local AK_POTION_GAP = 0.5
 -- 내구도 기준은 게임 자신의 경고 기준과 맞춘다.
 -- ⚠️ 클라의 `IS_DUR_UNDER_10PER` 는 **이름과 달리 `Dur / MaxDur < 0.3` 을 본다**
 -- (durnotify.lua:110). 게임이 띄우는 경고도 `DurUnder30` 이고, nexus auto_repair 의 발동
@@ -209,12 +291,77 @@ local AK_STA_PILLS = {
     "Drug_Alche_STA14", "Drug_Alche_STA15"
 }
 
+-- 바카리네 장비 탈착 / Vakarine gear re-equip
+-- 슬롯 정의. **이 순서가 곧 처리 순서다.**
+-- ⚠️ 원본은 `pairs(equip_map)` 로 큐를 만들어 실행할 때마다 탈착 순서가 달라졌다.
+-- 무기를 먼저 끼워야 서브무기 판정이 꼬이지 않으므로 무기 → 방어구 → 장신구 → 목걸이 순으로
+-- 고정한다. 목걸이가 마지막인 이유는 애니무스로 바꿔 끼는 특수 처리가 걸려 있어서다
+-- ⚠️ the original built its queue from pairs(), so the order differed run to run. this is fixed:
+-- weapons first, neck last (the neck carries the Animus substitution)
+-- clmsg 는 게임의 부위 이름을 그대로 쓰기 위한 ClMsg 키다. 일부만 대소문자가 다르다
+-- weapon = true 인 부위는 **입을 때 순서 의존이 있다**(양손무기가 왼손을 비우고, 방패는 오른손이
+-- 한손무기여야 하는 식). 그래서 이 넷만 하나씩 순서대로 입고 나머지는 한 번에 몰아 보낸다
+-- the weapon slots constrain each other when equipping, so only those four go one at a time
+local AK_VK_SLOTS = {
+    {key = "RH", idx = 8, clmsg = "RH", weapon = true},
+    {key = "LH", idx = 9, clmsg = "LH", weapon = true},
+    {key = "RH_SUB", idx = 30, clmsg = "RH_SUB", weapon = true},
+    {key = "LH_SUB", idx = 31, clmsg = "LH_SUB", weapon = true},
+    {key = "SHIRT", idx = 3, clmsg = "Shirt"},
+    {key = "PANTS", idx = 14, clmsg = "Pants"},
+    {key = "GLOVES", idx = 4, clmsg = "GLOVES"},
+    {key = "BOOTS", idx = 5, clmsg = "BOOTS"},
+    {key = "RING1", idx = 17, clmsg = "Ring1"},
+    {key = "RING2", idx = 18, clmsg = "Ring2"},
+    {key = "SHOULDER", idx = 34, clmsg = "SHOULDER"},
+    {key = "BELT", idx = 33, clmsg = "BELT"},
+    -- last = true : **무조건 제일 마지막에** 입는다. 애니무스로 바꿔 끼우는 부위라
+    -- 나머지가 전부 자리를 잡은 뒤에 처리해야 한다(사용자 확인 사항)
+    -- equipped dead last: this is the slot the Animus substitution lands in
+    {key = "NECK", idx = 19, clmsg = "NECK", last = true}
+}
+local AK_VK_DELAY = 0.1              -- 큐 한 걸음 간격 / one queue step
+-- 🔑 원본에는 재시도 상한이 아예 없었다. 인벤이 꽉 찼거나 서버가 거절하면 0.1초마다 같은
+-- 요청을 영원히 다시 날리고, 인벤토리 창은 열린 채로 남았다. 두 겹으로 막는다:
+-- 슬롯 하나당 요청 횟수 상한 + 전체 시간 상한
+-- 🔑 the original had no retry cap at all: a full inventory or a server refusal meant the same
+-- request every 0.1s forever, with the inventory window stuck open. two caps now bound it
+local AK_VK_TRY_MAX = 10             -- 슬롯 하나에 대한 요청 상한 / per-slot request cap
+-- 맵에 들어온 뒤 자동 실행을 언제 시도하는가. 원본은 GAME_START_3SEC 에서 곧바로 돌았고
+-- 사용자 체감도 "맵에 오자마자"였다. 장비 목록이 아직 안 왔을 때만 짧게 재시도한다
+-- the original ran right at GAME_START_3SEC; this retries quickly only while the equip list is
+-- still missing, instead of waiting out a flat grace period
+local AK_VK_AUTO_GAP = 0.2           -- 재시도 간격 / retry interval
+local AK_VK_AUTO_TRIES = 25          -- 최대 25회 = 5초까지만 기다린다 / give up after 5s
+local AK_VK_TIMEOUT = 20.0           -- 전체 강제 종료(초) / hard stop
+local AK_VK_ANIMUS = "NECK04_103"    -- 애니무스 목걸이 / the Animus necklace
+-- 자동 실행에서 제외/추가하는 맵. 11227 분열, 8022 베르니케, 11244 성역 3F
+local AK_VK_MAP_SKIP = 11227
+local AK_VK_MAP_EXTRA = {[8022] = true, [11244] = true}
+-- Revenge 표시 기준. 바카리네 축복 5세트면 45%, 아니면 35%
+local AK_VK_HP_SET = 0.45
+local AK_VK_HP_PLAIN = 0.35
+local AK_VK_SET_COUNT = 5            -- 이만큼 붙어 있어야 "5세트" / pieces needed
+-- 체력바 위 글자 크기. 숫자(%)와 상태(완벽/복수)를 따로 둔다 — 상태 쪽만 작게 해달라는 요청
+-- separate sizes: only the status word was asked to be smaller
+local AK_VK_HP_SIZE = "{s15}"        -- 체력 % 숫자 / the percentage
+local AK_VK_STATUS_SIZE = "{s12}"    -- 완벽 / 복수 / the status word
+
 -- ============================================================
 -- HUD 레이아웃 / HUD layout
 -- ============================================================
 local AK_HUD_FRAME = addonNameLower .. "_hud"
 local AK_UI_SKIN = "bg2"
 local AK_UI_ALPHA = 110
+-- 반투명 창 위에서는 글자가 배경에 묻힌다. **읽어야 하는 것**(값·입력칸·목록 행)에는
+-- 한 단계 진한 상자를 깔고, 제목·설명 라벨은 그대로 둔다(테마 §14)
+-- text sinks into a translucent window: anything you must read gets a darker box behind it
+local AK_SKIN_PANEL = "blackbox_op_50"    -- 구역 배경 / section background
+local AK_SKIN_FIELD = "blackbox_op_80"    -- 값·입력칸·켜진 목록 행 / values, inputs, lit rows
+-- 마우스를 올린 행. **더 투명하게** 해서 "지금 이걸 고르고 있다"를 보여준다(사용자 요청).
+-- 클라 선례: itemrullet.xml / transferseal.xml 의 FAR_FUTURE_OPTION_SKIN — 흐릿한 행 배경이다
+-- the hovered row goes more transparent; this skin is the client's own faded-row background
+local AK_SKIN_HOVER_ROW = "listbox_op_20"
 local AK_ICON = 28
 local AK_ICON_GAP = 8
 local AK_HUD_PAD = 12
@@ -226,8 +373,11 @@ local AK_HUD_H = 40
 local AK_LABEL_X = 8
 local AK_LABEL_W = 52
 local AK_ICON_X = AK_LABEL_X + AK_LABEL_W + 8
-local AK_HUD_W = AK_ICON_X + AK_ICON * 4 + AK_ICON_GAP * 3 + AK_HUD_PAD
-local AK_HUD_POS_VER = 2       -- 레이아웃이 바뀌면 올려서 기본 위치를 다시 잡는다
+-- AK_FEATURES 의 개수와 반드시 같아야 한다. 여기서만 쓰이므로 상수로 둔다
+-- must match #AK_FEATURES; kept as a constant because the width is needed before that table
+local AK_ICON_COUNT = 5
+local AK_HUD_W = AK_ICON_X + AK_ICON * AK_ICON_COUNT + AK_ICON_GAP * (AK_ICON_COUNT - 1) + AK_HUD_PAD
+local AK_HUD_POS_VER = 3       -- 레이아웃이 바뀌면 올려서 기본 위치를 다시 잡는다
 
 -- 켜짐 = 원래 색, 꺼짐 = 어둡게. picture 에 SetColorTone 을 쓰는 선례는
 -- adventure_book_achieve_ui.lua:407 (icon_pic 은 xml 에서 <picture>)
@@ -259,7 +409,14 @@ local AK_FEATURES = {
      tip_arg = AK_HP_RATIO},
     {key = "relic", icon = "icon_item_ectonite", label = "f_relic", tip = "tip_relic"},
     {key = "repair", icon = "icon_item_repairkit_550", label = "f_repair", tip = "tip_repair",
-     tip_arg = AK_DUR_RATIO}
+     tip_arg = AK_DUR_RATIO},
+    -- 🔑 다른 넷과 조작이 다르다. 좌클릭 = 지금 실행, 우클릭 = 자동 실행/설정 팝업.
+    -- 아이콘 색은 "맵 진입 시 자동 실행" 상태를 나타낸다(캐릭터별 설정이라 AK_on 이 아니다)
+    -- 🔑 this one behaves differently: left click runs it now, right click opens a small menu.
+    -- the icon tone reflects the per-character auto-run flag, not an account-wide AK_on key
+    -- 아이콘 = 채팅 이모티콘 "바카리네힘내"(chat_emoticons.ies 61)의 정지 이미지
+    {key = "vakarine", icon = "bakarine_emotion61", label = "f_vakarine", tip = "tip_vakarine",
+     manual = true}
 }
 
 -- ============================================================
@@ -345,7 +502,8 @@ function AK_load_settings()
     -- 기본은 전부 꺼짐. 자동으로 아이템을 쓰는 기능이라 사용자가 켜는 게 맞다
     -- everything defaults to off: these spend items, so the user opts in
     for _, f in ipairs(AK_FEATURES) do
-        if s[f.key] ~= 1 then
+        -- manual 기능(바카리네)은 계정 공통 on/off 가 없다. 상태는 vk.chars 에 캐릭터별로 있다
+        if not f.manual and s[f.key] ~= 1 then
             s[f.key] = 0
         end
     end
@@ -358,6 +516,23 @@ function AK_load_settings()
     end
     if type(s.repair_buy_qty) ~= "number" or s.repair_buy_qty < 1 or s.repair_buy_qty > 999 then
         s.repair_buy_qty = 50
+    end
+    -- 바카리네: jsr·표시 취향은 계정 공통, 자동 실행과 부위 선택은 캐릭터별
+    -- ⚠️ 원본은 기본값을 "설정 파일이 아예 없을 때"만 채워서, 나중에 항목을 추가하면 구 파일에
+    -- 그 키가 없는 채로 남아 창이 안 열렸다. 여기서는 매번 빠진 키만 메운다
+    -- ⚠️ the original filled defaults only when the file was missing entirely, so a key added
+    -- later stayed nil in existing files. this backfills whatever is missing, every load
+    if type(s.vk) ~= "table" then
+        s.vk = {}
+    end
+    if s.vk.jsr ~= 0 then
+        s.vk.jsr = 1
+    end
+    if s.vk.hp_overlay ~= 0 then
+        s.vk.hp_overlay = 1
+    end
+    if type(s.vk.chars) ~= "table" then
+        s.vk.chars = {}
     end
     g.settings = s
     if s.hud_ver ~= AK_HUD_POS_VER or type(s.hud_x) ~= "number" or type(s.hud_y) ~= "number" then
@@ -401,6 +576,44 @@ function AK_HOVER_OFF(frame, ctrl)
     if tone ~= nil and tone ~= "" and tone ~= "None" then
         ctrl:SetColorTone(tone)
     end
+end
+
+-- groupbox 용 오버 처리. **groupbox 에는 SetColorTone 선례가 없어서**(테마) 색이 아니라
+-- 스킨을 갈아 끼운다. 값이 없는 GetUserValue 는 "None" 을 돌려주므로 "None" 은 스킨 이름으로
+-- 쓰지 않는다(구분이 안 된다)
+-- groupbox has no SetColorTone precedent, so the skin is swapped instead. "None" is never used
+-- as a hover skin here because an unset user value reads back as exactly that
+function AK_SKIN_ON(frame, ctrl)
+    if ctrl == nil then
+        return
+    end
+    local skin = ctrl:GetUserValue("AK_SKIN_HOVER")
+    if skin ~= nil and skin ~= "" and skin ~= "None" then
+        AUTO_CAST(ctrl)
+        ctrl:SetSkinName(skin)
+    end
+end
+
+function AK_SKIN_OFF(frame, ctrl)
+    if ctrl == nil then
+        return
+    end
+    local skin = ctrl:GetUserValue("AK_SKIN_IDLE")
+    if skin ~= nil and skin ~= "" and skin ~= "None" then
+        AUTO_CAST(ctrl)
+        ctrl:SetSkinName(skin)
+    end
+end
+
+local function AK_skin_hover(ctrl, idle, hover)
+    if ctrl == nil then
+        return
+    end
+    ctrl:SetUserValue("AK_SKIN_IDLE", idle)
+    ctrl:SetUserValue("AK_SKIN_HOVER", hover)
+    ctrl:SetSkinName(idle)
+    ctrl:SetEventScript(ui.MOUSEON, "AK_SKIN_ON")
+    ctrl:SetEventScript(ui.MOUSEOFF, "AK_SKIN_OFF")
 end
 
 -- 평상시/오버 색을 컨트롤에 붙여 둔다. 상태색이 있는 아이콘은 상태가 바뀔 때 다시 부르면 된다
@@ -717,7 +930,7 @@ function AK_potion_watch_start()
     end
     g.frame:StopUpdateScript("AK_potion_tick")
     if AK_on("potion") then
-        g.frame:RunUpdateScript("AK_potion_tick", 1.0)
+        g.frame:RunUpdateScript("AK_potion_tick", AK_POTION_GAP)
     end
 end
 
@@ -952,7 +1165,10 @@ local function AK_repair_try()
 end
 
 -- durnotify 가 구독하는 것과 같은 원본 메시지 / the same source messages durnotify subscribes to
+-- 장비가 바뀌는 자리이기도 하므로 바카리네 5세트 판정 캐시를 여기서 무효화한다(§5)
+-- this is also where equipment changes land, so it invalidates the Vakarine set cache
 function AK_DUR_CHECK()
+    g.vk_dirty = true
     AK_repair_try()
 end
 
@@ -982,8 +1198,594 @@ function AK_repair_watch_start()
 end
 
 -- ============================================================
+-- 5. 바카리네 장비 탈착 / Vakarine gear re-equip
+--   nexus `vakarine_equip` 을 옮겨왔다. 고친 것:
+--   ⓐ 재시도 상한이 없어 인벤이 꽉 차거나 서버가 거절하면 0.1초마다 영원히 반복하던 것
+--   ⓑ `pairs()` 순회라 실행마다 탈착 순서가 달랐던 것
+--   ⓒ 피격(TAKE_DAMAGE)마다 전 장비의 랜덤옵션을 훑던 5세트 판정 → 장비가 바뀔 때만 재계산
+--   ⓓ 애니무스 재시도 카운터를 `GetUserIValue` 로 "쓰려고" 해서 늘 0이던 것(setter 는
+--      `SetUserValue` 다 — 여기서는 아예 우리 상태로 들고 있는다) + 인벤에 없을 때의 nil 인덱싱
+--   ⓔ 무기 슬롯 표시를 1번으로 바꿔놓고 되돌리지 않던 것
+--   ported from nexus vakarine_equip with its unbounded retries, nondeterministic order,
+--   per-hit equipment scan, broken retry counter and unrestored weapon-slot display all fixed
+-- ============================================================
+local AK_NEXUS_DIR = "_nexus_addons"
+
+-- nexus 쪽 설정에서 부위 선택을 가져온다. **읽기만 한다** — 남의 애드온 설정은 쓰지 않는다
+-- read-only import of the slot selection from nexus; we never write to another addon's settings
+local function AK_vk_import_nexus(c)
+    local src = AK_load_json(string.format("../addons/%s/%s/vakarine_equip.json",
+        AK_NEXUS_DIR, g.active_id))
+    if not src or type(src.chars) ~= "table" or not g.cid then
+        return false
+    end
+    local mine = src.chars[g.cid]
+    if type(mine) ~= "table" then
+        return false
+    end
+    local found = 0
+    for _, slot in ipairs(AK_VK_SLOTS) do
+        if mine[slot.key] == 1 then
+            c.slots[slot.key] = 1
+            found = found + 1
+        end
+    end
+    if src.jsr == 0 then
+        g.settings.vk.jsr = 0
+    end
+    return found > 0
+end
+
+-- 캐릭터별 설정. 없으면 만들고, 처음 만드는 경우에만 nexus 설정을 가져온다.
+-- ⚠️ 자동 실행은 가져오지 않고 항상 꺼진 채로 시작한다 — nexus 쪽을 아직 안 껐다면 둘 다 돌아
+-- 탈착이 두 번 걸리기 때문이다. auto_keeper 의 다른 기능과도 같은 규칙이다(전부 opt-in)
+-- ⚠️ the auto-run flag is deliberately not imported: nexus may still be enabled, and two swaps
+-- would fight. it starts off, like every other auto_keeper feature
+local function AK_vk_char()
+    if not g.settings or not g.cid then
+        return nil
+    end
+    local c = g.settings.vk.chars[g.cid]
+    local fresh = false
+    if type(c) ~= "table" then
+        c = {auto = 0, slots = {}}
+        g.settings.vk.chars[g.cid] = c
+        fresh = true
+    end
+    if type(c.slots) ~= "table" then
+        c.slots = {}
+    end
+    if fresh and AK_vk_import_nexus(c) then
+        CHAT_SYSTEM(AK_t("vk_import"))
+    end
+    if c.auto ~= 1 then
+        c.auto = 0
+    end
+    for _, slot in ipairs(AK_VK_SLOTS) do
+        if c.slots[slot.key] ~= 1 then
+            c.slots[slot.key] = 0
+        end
+    end
+    if fresh then
+        AK_save_settings()
+    end
+    return c
+end
+
+function AK_vk_auto_on()
+    local c = AK_vk_char()
+    return c ~= nil and c.auto == 1
+end
+
+local function AK_vk_has_slot(c)
+    for _, slot in ipairs(AK_VK_SLOTS) do
+        if c.slots[slot.key] == 1 then
+            return true
+        end
+    end
+    return false
+end
+
+-- 장비 목록이 서버에서 도착했는가. 맵 진입 직후에는 아직 비어 있을 수 있는데, 그때 판정하면
+-- "5세트가 아니다 / 벗을 게 없다"로 잘못 결론내고 조용히 끝난다.
+-- ⚠️ 이걸 시간(유예 5초)으로 때우면 원본보다 5초 느려진다 — 상태를 직접 보고 준비되면 바로 간다
+-- ⚠️ waiting out a fixed grace period costs 5s over the original; this checks the actual state
+local function AK_vk_equip_ready()
+    local list = session.GetEquipItemList()
+    if not list then
+        return false
+    end
+    local guids = list:GetGuidList()
+    if not guids then
+        return false
+    end
+    for i = 0, guids:Count() - 1 do
+        if guids:Get(i) ~= "0" then
+            return true
+        end
+    end
+    return false
+end
+
+-- 착용 장비 중 "바카리네 축복" 랜덤옵션이 붙은 개수를 센다.
+-- 🔑 비싼 판정이다(장비 수 x 랜덤옵션 수 만큼 ScpArgMsg). 원본은 이걸 STAT_UPDATE/TAKE_DAMAGE
+-- 에 물려 전투 중 초당 수십 번 돌렸다. 여기서는 장비가 바뀌었다는 신호(AK_DUR_CHECK)가 왔을
+-- 때만 다시 계산하고 나머지는 캐시를 읽는다
+-- 🔑 an expensive scan the original ran on every hit taken; now it is recomputed only when an
+-- equipment change is signalled, and read from cache otherwise
+local function AK_vk_scan_set()
+    local list = session.GetEquipItemList()
+    if not list then
+        return false
+    end
+    local guids = list:GetGuidList()
+    local worn = 0
+    for i = 0, guids:Count() - 1 do
+        local guid = guids:Get(i)
+        if guid ~= "0" then
+            local equip = list:GetItemByGuid(guid)
+            local obj = equip and GetIES(equip:GetObject())
+            if obj then
+                for j = 1, MAX_OPTION_EXTRACT_COUNT do
+                    local msg = ScpArgMsg(obj["RandomOption_" .. j])
+                    if msg ~= nil and string.find(msg, "vakarine_bless") ~= nil then
+                        worn = worn + 1
+                        break
+                    end
+                end
+            end
+        end
+    end
+    return worn >= AK_VK_SET_COUNT
+end
+
+function AK_vk_is_set()
+    if g.vk_set == nil or g.vk_dirty then
+        -- ⚠️ 장비 목록이 아직 안 왔으면 **캐시하지 않는다.** 여기서 false 를 굳혀 버리면 그 뒤
+        -- 자동 실행이 계속 "5세트 아님"으로 판정된다. 접속 직후에는 체력바 오버레이 타이머가
+        -- 이 함수를 먼저 부르므로 실제로 일어날 수 있는 순서다
+        -- ⚠️ never cache a verdict taken from an empty equip list: the HP overlay timer calls this
+        -- first after login, and a cached false would suppress the auto run for good
+        if not AK_vk_equip_ready() then
+            return false
+        end
+        local ok, worn = pcall(AK_vk_scan_set)
+        g.vk_set = (ok and worn) or false
+        g.vk_dirty = false
+    end
+    return g.vk_set
+end
+
+local function AK_vk_map_type()
+    local ok, cls = pcall(GetClass, "Map", session.GetMapName())
+    if not ok or not cls then
+        return "None", "None"
+    end
+    return TryGetProp(cls, "MapType", "None"), TryGetProp(cls, "Keyword", "None")
+end
+
+-- 자동 실행 대상 맵인가. 주간 보스 레이드(JSR)는 맵 ID 를 박지 않고 Keyword 로 본다 —
+-- IMC 가 맵을 추가해도 누락되지 않는다(클라도 같은 방식: indunenter.lua:327)
+-- weekly boss maps are matched by Keyword rather than hardcoded ids, like the client itself
+local function AK_vk_map_ok()
+    local map_id = session.GetMapID()
+    if AK_VK_MAP_EXTRA[map_id] then
+        return true
+    end
+    local map_type, keyword = AK_vk_map_type()
+    if keyword ~= nil and string.find(keyword, "WeeklyBossMap") ~= nil then
+        return g.settings.vk.jsr == 1
+    end
+    return map_type == "Instance" and map_id ~= AK_VK_MAP_SKIP
+end
+
+-- quiet 는 "열자마자 할 일이 없었다"는 경우다. 정리는 똑같이 하되 완료 메시지는 내지 않는다
+-- quiet covers "nothing to do after all": same cleanup, no completion notice
+local function AK_vk_finish(done, quiet)
+    g.vk_step = nil
+    g.vk_queue = nil
+    g.vk_dirty = true
+    local inv = ui.GetFrame("inventory")
+    if inv then
+        -- 표시하던 무기 슬롯 세트를 되돌린다. DO_WEAPON_SLOT_CHANGE 는 이미지 두 장과
+        -- CURRENT_WEAPON_INDEX 만 바꾸는 **표시 전용** 함수라(inventory.lua:4499-4530) 서버와는
+        -- 무관하지만, 원본은 1번으로 바꿔놓고 되돌리지 않아 사용자 화면이 멋대로 바뀌어 있었다
+        -- display-only in the client, but the original never put it back
+        if g.vk_prev_slot == 2 then
+            DO_WEAPON_SLOT_CHANGE(inv, 2)
+        end
+        inv:ShowWindow(0)
+    end
+    ui.SetHoldUI(false)
+    if not quiet then
+        CHAT_SYSTEM(done and AK_t("vk_done") or AK_t("vk_stuck"))
+    end
+end
+
+-- 큐 항목 하나를 착용 요청한다. 반환 true = 요청을 보냈다 / false = 보낼 필요·방법이 없어
+-- done 으로 처리했다. 몰아 보내기와 한 개씩 보내기가 이 함수를 공유한다
+-- shared by both the burst and the one-at-a-time path
+local function AK_vk_equip_one(e, list)
+    -- 목걸이만 예외: 애니무스를 갖고 있으면 원래 목걸이 대신 그것을 낀다(원본과 동일)
+    local want = e.iesid
+    if e.slot.key == "NECK" and g.vk_animus then
+        want = g.vk_animus
+    end
+    local cur = list and list:GetEquipItemByIndex(e.slot.idx) or nil
+    if cur ~= nil and cur:GetIESID() == want then
+        e.done = true
+        return false
+    end
+    if e.try >= AK_VK_TRY_MAX then
+        e.done = true
+        g.vk_gave_up = true
+        return false
+    end
+    local inv_item = session.GetInvItemByGuid(want)
+    if inv_item == nil then
+        -- 인벤에서 사라졌다(팔았거나 창고에 넣었거나) / gone from the inventory
+        e.done = true
+        g.vk_gave_up = true
+        return false
+    end
+    e.try = e.try + 1
+    ITEM_EQUIP(inv_item.invIndex, e.slot.key)
+    return true
+end
+
+-- 한 걸음에 요청 하나. 요청이 먹혔는지는 다음 걸음에서 장비 목록을 다시 읽어 판단한다.
+-- 슬롯당 요청 상한과 전체 시간 상한 두 겹으로 무한 반복을 막는다
+-- one request per step, verified by re-reading the equip list on the next step. two caps bound it
+function AK_vk_tick(frame)
+    if g.vk_step == nil or not g.vk_queue then
+        frame:StopUpdateScript("AK_vk_tick")
+        return 0
+    end
+    if imcTime.GetAppTime() - (g.vk_started or 0) > AK_VK_TIMEOUT then
+        AK_vk_finish(false)
+        return 0
+    end
+    local list = session.GetEquipItemList()
+    if not list then
+        return 1
+    end
+
+    -- 탈거 단계는 이제 **확인과 재시도**만 한다(첫 요청은 AK_vk_start 에서 한꺼번에 보냈다)
+    -- the unequip phase now only verifies and retries; the first round went out as a burst
+    if g.vk_step == "unequip" then
+        for _, e in ipairs(g.vk_queue) do
+            if not e.done then
+                local cur = list:GetEquipItemByIndex(e.slot.idx)
+                if cur == nil or cur:GetIESID() == "0" then
+                    e.done = true
+                elseif e.try >= AK_VK_TRY_MAX then
+                    -- 안 벗겨진다(인벤이 꽉 찼을 때 등): 포기하고 다음 부위로.
+                    -- 조용히 넘기면 "완료"라고 알리게 되므로 포기했다는 사실을 남긴다
+                    -- give up on this slot, but remember it so the notice is not a false "done"
+                    e.done = true
+                    g.vk_gave_up = true
+                else
+                    e.try = e.try + 1
+                    item.UnEquip(e.slot.idx)
+                    return 1
+                end
+            end
+        end
+        for _, e in ipairs(g.vk_queue) do
+            e.done = false
+            e.try = 0
+        end
+        g.vk_step = "equip"
+        -- 🔑 방어구·장신구는 서로 순서 의존이 없으므로 **여기서 한 번에** 보낸다.
+        -- 순서대로 가야 하는 것만 남긴다: 무기 4부위(서로를 제약한다) + 목걸이(last, 애니무스라
+        -- 무조건 맨 끝). AK_VK_SLOTS 에서 NECK 이 배열 마지막이므로 순차 루프가 자연히 끝에 둔다
+        -- 🔑 armour and accessories go out together. what stays sequenced: the four weapon slots
+        -- (they constrain each other) and the neck (Animus, always dead last - it is the final
+        -- element of AK_VK_SLOTS so the sequential loop naturally leaves it for the end)
+        for _, e in ipairs(g.vk_queue) do
+            if not e.slot.weapon and not e.slot.last then
+                AK_vk_equip_one(e, list)
+            end
+        end
+        return 1
+    end
+
+    -- 무기는 하나씩, 나머지는 위에서 몰아 보낸 것의 확인·재시도만 한다
+    -- weapons one at a time; the rest is verification and retries for the burst
+    for _, e in ipairs(g.vk_queue) do
+        if not e.done and AK_vk_equip_one(e, list) then
+            return 1
+        end
+    end
+
+    AK_vk_finish(not g.vk_gave_up)
+    return 0
+end
+
+-- 반환값 = **판정이 끝났는가**(시작했든, 할 일이 없다고 결론냈든). false 는 "장비 목록이 아직
+-- 안 와서 판단 자체를 못 했다"는 뜻이고, 그때만 호출자가 다시 부른다
+-- returns whether a verdict was reached; false means "could not decide yet, call me again"
+function AK_vk_start(is_manual)
+    if not g.settings then
+        return true
+    end
+    local c = AK_vk_char()
+    if not c then
+        return true
+    end
+    if g.vk_step ~= nil then
+        if is_manual then
+            CHAT_SYSTEM(AK_t("vk_busy"))
+        end
+        return true
+    end
+    if not is_manual then
+        -- 장비 목록이 아직이면 판정을 미룬다. 여기서 5세트를 물으면 "아니다"가 나와 버린다
+        if not AK_vk_equip_ready() then
+            return false
+        end
+        if c.auto ~= 1 or not AK_vk_is_set() or not AK_vk_map_ok() then
+            return true
+        end
+    end
+    -- ⚠️ 인벤토리를 열기 **전에** 판정한다. 원본은 먼저 열고 나서 큐가 비면 그냥 return 해서
+    -- 아무것도 안 하고 인벤토리 창만 열어둔 채로 끝났다
+    -- ⚠️ decided before the inventory is opened: the original opened it first and could then
+    -- return without doing anything, leaving the window open
+    if not AK_vk_has_slot(c) then
+        if is_manual then
+            CHAT_SYSTEM(AK_t("vk_none"))
+        end
+        return true
+    end
+
+    local inv = ui.GetFrame("inventory")
+    if not inv then
+        return false
+    end
+    g.vk_prev_slot = inv:GetUserIValue("CURRENT_WEAPON_INDEX")
+    inv:ShowWindow(1)
+    DO_WEAPON_SLOT_CHANGE(inv, 1)
+    ui.SetHoldUI(true)
+
+    local list = session.GetEquipItemList()
+    local queue = {}
+    local wants_neck = false
+    if list then
+        for _, slot in ipairs(AK_VK_SLOTS) do
+            if c.slots[slot.key] == 1 then
+                local cur = list:GetEquipItemByIndex(slot.idx)
+                local iesid = (cur ~= nil) and cur:GetIESID() or "0"
+                if iesid ~= "0" then
+                    table.insert(queue, {slot = slot, iesid = iesid, try = 0, done = false})
+                    if slot.key == "NECK" then
+                        wants_neck = true
+                    end
+                end
+            end
+        end
+    end
+    -- 고른 부위를 지금 하나도 착용하고 있지 않다. 열어둔 인벤토리는 반드시 닫는다
+    if #queue == 0 then
+        AK_vk_finish(true, true)
+        if is_manual then
+            CHAT_SYSTEM(AK_t("vk_none"))
+        end
+        return true
+    end
+
+    -- ⚠️ 원본은 목걸이를 고르지 않았어도 애니무스를 기억해 두고, 나중에 도시에서 그것을 강제로
+    -- 끼웠다(고르지도 않은 부위를 건드린다). 목걸이가 큐에 있을 때만 잡는다
+    -- ⚠️ the original latched the Animus even when NECK was not selected, and later force-equipped
+    -- it in town - a slot the user never asked for. only latched when NECK is actually queued
+    g.vk_animus = nil
+    g.vk_animus_try = 0
+    if wants_neck then
+        local animus = session.GetInvItemByName(AK_VK_ANIMUS)
+        g.vk_animus = animus and animus:GetIESID() or nil
+    end
+
+    g.vk_queue = queue
+    g.vk_step = "unequip"
+    g.vk_gave_up = false
+    g.vk_started = imcTime.GetAppTime()
+    CHAT_SYSTEM(AK_t("vk_run"))
+
+    -- 🔑 벗는 것은 **한 번에 몰아 보낸다.** 부위마다 한 틱(0.1초)씩 기다리면 13부위에 1.3초가
+    -- 걸리는데, 탈거는 부위끼리 순서 의존이 없다(각각 독립 요청이다). 입는 쪽은 무기 → 방어구
+    -- → 목걸이 순서가 있어야 하므로 지금처럼 하나씩 간다.
+    -- 몰아 보낸 뒤에도 남는 부위가 있으면 다음 틱부터 기존 로직이 하나씩 재시도한다
+    -- 🔑 the unequips go out together: they have no ordering dependency on each other, while the
+    -- equips do (weapons first, neck last). anything that survives the burst is retried one per
+    -- tick by the existing loop
+    -- ⚠️ 일괄 탈착 API(session.job.ReqUnEquipItemAll)는 쓰지 않는다 — 인자가 없어서 부위를
+    -- 고를 수 없고(클라 전직 UI 전용: changejob.lua:461), 인장·코어·면류관·모자까지 다 벗긴다
+    -- ⚠️ session.job.ReqUnEquipItemAll takes no arguments, so it cannot spare the slots the user
+    -- wants kept - it is the job-change strip-everything path
+    for _, e in ipairs(queue) do
+        e.try = 1
+        item.UnEquip(e.slot.idx)
+    end
+
+    g.frame:StopUpdateScript("AK_vk_tick")
+    g.frame:RunUpdateScript("AK_vk_tick", AK_VK_DELAY)
+    return true
+end
+
+-- 맵에 들어오자마자(GAME_START_3SEC) 도는 재시도 루프. 장비 목록이 오는 즉시 실행하고 멈춘다
+-- fires the moment the equip list arrives, then stops
+function AK_vk_auto_tick(frame)
+    g.vk_auto_try = (g.vk_auto_try or 0) + 1
+    if AK_vk_start(false) or g.vk_auto_try >= AK_VK_AUTO_TRIES then
+        frame:StopUpdateScript("AK_vk_auto_tick")
+        return 0
+    end
+    return 1
+end
+
+function AK_vk_manual()
+    AK_vk_start(true)
+end
+
+-- 애니무스 확인. 탈착 때 애니무스로 바꿔 끼우는 데 실패했으면 도시에서 다시 시도한다.
+-- ⚠️ 원본은 `GetUserIValue("TRY", try + 1)` 로 카운터를 "쓰려고" 했다 — 그건 getter 라
+-- 값이 안 써지고 TRY 는 영원히 0이었다(setter 는 SetUserValue). 상한이 무력화돼 1초마다
+-- 무한 재시도했고, 인벤에 애니무스가 없으면 nil 인덱싱으로 에러까지 났다
+-- ⚠️ the original used the getter to try to write its retry counter, so the cap never applied
+function AK_vk_animus_tick(frame)
+    if not g.vk_animus then
+        frame:StopUpdateScript("AK_vk_animus_tick")
+        return 0
+    end
+    -- 탈착이 도는 중이면 그쪽이 목걸이를 만지고 있다. 끝날 때까지 기다린다
+    if g.vk_step ~= nil then
+        return 1
+    end
+    local list = session.GetEquipItemList()
+    local cur = list and list:GetEquipItemByIndex(19) or nil
+    if cur ~= nil and cur:GetIESID() == g.vk_animus then
+        g.vk_animus = nil
+        return 0
+    end
+    g.vk_animus_try = (g.vk_animus_try or 0) + 1
+    local inv_item = session.GetInvItemByGuid(g.vk_animus)
+    if inv_item == nil or g.vk_animus_try > 3 then
+        g.vk_animus = nil
+        return 0
+    end
+    ITEM_EQUIP(inv_item.invIndex, "NECK")
+    return 1
+end
+
+-- ============================================================
+-- 체력바 상태 표시 (바카리네 옵션)
+--   표시 자체는 현재/최대 체력 비교뿐이다. 장비를 훑는 것은 Revenge 기준선(45% / 35%)을
+--   고르기 위해서인데, 그 값은 캐시라 매 틱 비용이 사실상 없다
+--   the overlay itself is just current/max HP; the set check only picks the threshold and is cached
+-- ============================================================
+local function AK_vk_hp_text(base, name, gauge, dy, text)
+    local ctrl = base:CreateOrGetControl("richtext", name, 0, 0, gauge:GetWidth(), gauge:GetHeight())
+    AUTO_CAST(ctrl)
+    ctrl:SetGravity(ui.RIGHT, ui.TOP)
+    ctrl:SetOffset(gauge:GetX(), gauge:GetY() - dy)
+    ctrl:EnableHitTest(false)
+    ctrl:SetText(text)
+    ctrl:ShowWindow(1)
+    return ctrl
+end
+
+function AK_vk_hp_clear()
+    local base = ui.GetFrame("charbaseinfo1_my")
+    if not base then
+        return
+    end
+    for _, name in ipairs({"ak_vk_status", "ak_vk_hp"}) do
+        local ctrl = GET_CHILD(base, name)
+        if ctrl then
+            AUTO_CAST(ctrl)
+            ctrl:ShowWindow(0)
+        end
+    end
+end
+
+-- 🔑 HP 와 maxHP 는 부를 때마다 **새로 읽는다**(info.GetStat). 캐시되는 것은 바카리네 5세트
+-- 개수뿐이고 그건 장비에만 달려 있으므로, 스킬로 최대 체력이 바뀌어 현재 비율이 달라지는
+-- 상황도 그대로 반영된다. 남은 문제는 정확성이 아니라 **얼마나 빨리 반영되는가**였다
+-- 🔑 both HP and maxHP are re-read on every call; only the set count is cached and that depends
+-- on equipment alone, so a skill that moves max HP is reflected correctly. the open question was
+-- latency, not correctness
+local function AK_vk_hp_refresh()
+    if not g.settings or g.settings.vk.hp_overlay ~= 1 then
+        return
+    end
+    local base = ui.GetFrame("charbaseinfo1_my")
+    local gauge = base and GET_CHILD_RECURSIVELY(base, "pcHpGauge") or nil
+    local stat = AK_my_stat()
+    if not gauge or not stat or not stat.maxHP or stat.maxHP <= 0 then
+        return
+    end
+    AUTO_CAST(gauge)
+    local pct = stat.HP * 100 / stat.maxHP
+    local color, status = "#FFFFFF", ""
+    if pct >= 100 then
+        color, status = "#00EC00", AK_t("hp_perfect")
+    elseif pct <= (AK_vk_is_set() and AK_VK_HP_SET or AK_VK_HP_PLAIN) * 100 then
+        color, status = "#EA0000", AK_t("hp_revenge")
+    end
+    AK_vk_hp_text(base, "ak_vk_status", gauge, 25,
+        string.format("{ol}%s{%s}%s", AK_VK_STATUS_SIZE, color, status))
+    AK_vk_hp_text(base, "ak_vk_hp", gauge, 10,
+        string.format("{ol}%s{%s}%d%%", AK_VK_HP_SIZE, color, pct))
+end
+
+-- 체력이 움직이는 순간을 받는 주 경로. 원본도 이 세 메시지를 썼고, 원본이 무거웠던 이유는
+-- 메시지가 아니라 **그 안에서 착용 장비의 랜덤옵션을 전부 훑었기** 때문이다. 그 스캔이
+-- 캐시로 빠진 지금은 info.GetStat 한 번 + 글자 두 줄이라 비용이 거의 없다.
+-- 그래도 도트힐·다중 피격으로 초당 수십 번 올 수 있으므로 0.05초(초당 20회) 상한을 둔다
+-- the same three messages the original used: what made it heavy was the equipment scan inside,
+-- not the messages themselves. still capped at 20/s
+function AK_VK_HP_MSG()
+    if not g.settings or g.settings.vk.hp_overlay ~= 1 then
+        return
+    end
+    if AK_throttled("vk_hp", 0.05) then
+        return
+    end
+    AK_vk_hp_refresh()
+end
+
+-- 안전 타이머. 메시지가 메꾸지 못하는 경우를 받는다: 상한에 걸려 연타의 마지막 갱신을
+-- 건너뛴 직후, 그리고 피격 없이 최대 체력만 조용히 바뀐 경우.
+-- 다른 네 기능과 같은 "메시지 + 안전 타이머" 구조다
+-- safety tick for what the messages miss: a burst's last update lost to the cap, and a max HP
+-- change with no damage event. same message+timer shape as the other four features
+function AK_vk_hp_tick(frame)
+    if not g.settings or g.settings.vk.hp_overlay ~= 1 then
+        frame:StopUpdateScript("AK_vk_hp_tick")
+        AK_vk_hp_clear()
+        return 0
+    end
+    AK_vk_hp_refresh()
+    return 1
+end
+
+function AK_vk_hp_watch_start()
+    if not g.frame or not g.settings then
+        return
+    end
+    g.frame:StopUpdateScript("AK_vk_hp_tick")
+    if g.settings.vk.hp_overlay == 1 then
+        g.frame:RunUpdateScript("AK_vk_hp_tick", 0.5)
+    else
+        AK_vk_hp_clear()
+    end
+end
+
+-- nexus 쪽이 켜져 있으면 알린다. 남의 설정 파일은 읽기만 하고 건드리지 않는다
+-- warn when the nexus copy is still enabled; its settings file is only read, never written
+function AK_vk_nexus_warn()
+    if g.vk_warned then
+        return
+    end
+    g.vk_warned = true
+    local s = AK_load_json(string.format("../addons/%s/%s/settings.json", AK_NEXUS_DIR, g.active_id))
+    if s and type(s.vakarine_equip) == "table" and s.vakarine_equip.use == 1 then
+        CHAT_SYSTEM(AK_t("vk_nexus"))
+    end
+end
+
+-- ============================================================
 -- HUD
 -- ============================================================
+-- 바카리네만 계정 공통 키가 아니라 캐릭터별 자동 실행 상태를 쓴다
+-- the Vakarine icon reflects a per-character flag rather than an account-wide key
+local function AK_feature_on(key)
+    if key == "vakarine" then
+        return AK_vk_auto_on()
+    end
+    return AK_on(key)
+end
+
 function AK_hud_set_visual()
     local frame = ui.GetFrame(AK_HUD_FRAME)
     if not frame or not g.settings then
@@ -994,7 +1796,7 @@ function AK_hud_set_visual()
         if icon then
             AUTO_CAST(icon)
             -- 상태에 맞는 (평상시, 오버) 짝을 다시 붙인다 / re-attach the pair for the new state
-            if AK_on(f.key) then
+            if AK_feature_on(f.key) then
                 AK_hover(icon, AK_TONE_ON, AK_TONE_ON_HOVER)
             else
                 AK_hover(icon, AK_TONE_OFF, AK_TONE_OFF_HOVER)
@@ -1052,16 +1854,10 @@ function AK_credit_whisper()
     pcall(ui.WhisperTo, AK_CREDIT_WHISPER_NAME)
 end
 
+-- 설정창이 둘(수리 / 바카리네)이므로 둘 다 훑는다. 콜백은 어느 창이 요청했는지 모른다
+-- there are two settings windows now and the callback does not say which one asked
 function AK_credit_emblem_loaded(code)
     if code ~= 200 then
-        return
-    end
-    local frame = ui.GetFrame(addonNameLower .. "_repair_cfg")
-    if not frame then
-        return
-    end
-    local emblem = GET_CHILD(frame, "credit_emblem")
-    if not emblem then
         return
     end
     local ok_w, world_id = pcall(session.party.GetMyWorldIDStr)
@@ -1072,9 +1868,15 @@ function AK_credit_emblem_loaded(code)
     if not ok_n or not image_name then
         return
     end
-    AUTO_CAST(emblem)
-    emblem:SetImage("")
-    emblem:SetFileName(image_name)
+    for _, name in ipairs({addonNameLower .. "_repair_cfg", addonNameLower .. "_vk_cfg"}) do
+        local frame = ui.GetFrame(name)
+        local emblem = frame and GET_CHILD(frame, "credit_emblem") or nil
+        if emblem then
+            AUTO_CAST(emblem)
+            emblem:SetImage("")
+            emblem:SetFileName(image_name)
+        end
+    end
 end
 
 function AK_credit_render(parent, parent_w, y, pad)
@@ -1281,12 +2083,345 @@ function AK_cfg_open()
     frame:ShowWindow(1)
 end
 
+-- ============================================================
+-- 바카리네 설정창 + 우클릭 미니 팝업
+--   테마 §14: 읽어야 하는 것(부위 목록 행)에는 한 단계 진한 상자를 깐다.
+--   켜진 행 = blackbox_op_80 + 흰 글씨 / 꺼진 행 = blackbox_op_50 + 회색 글씨 —
+--   탭의 활성/비활성 규칙(§4)과 같은 대비이면서, 꺼진 행도 진한 바탕 위라 계속 읽힌다
+--   lit rows use the darker box, unlit rows the lighter one: both stay legible over the
+--   translucent window, which plain text on the window itself does not
+-- ============================================================
+local AK_VK_CFG = addonNameLower .. "_vk_cfg"
+local AK_VK_MENU = addonNameLower .. "_vk_menu"
+local AK_VK_W = 340
+local AK_VK_H = 430
+local AK_VK_PAD = 14
+local AK_VK_SROW = 26                       -- 부위 목록 행 높이 / slot row height
+local AK_VK_LIST_Y = 208
+local AK_VK_COL_W = 153
+local AK_VK_LEFT_ROWS = 7                   -- 왼쪽 열에 7개, 나머지 6개는 오른쪽 열
+local AK_VK_MENU_W = 170
+local AK_VK_MENU_ROW = 28
+
+local function AK_vk_slot_name(slot)
+    local ok, name = pcall(ClMsg, slot.clmsg)
+    if not ok or name == nil or name == "" or name == "None" then
+        return slot.key
+    end
+    return name
+end
+
+function AK_vk_cfg_visual()
+    local frame = ui.GetFrame(AK_VK_CFG)
+    local c = AK_vk_char()
+    if not frame or not c then
+        return
+    end
+    local all_on = true
+    for _, slot in ipairs(AK_VK_SLOTS) do
+        local on = c.slots[slot.key] == 1
+        if not on then
+            all_on = false
+        end
+        local row = GET_CHILD(frame, "vk_row_" .. slot.key)
+        if row then
+            AUTO_CAST(row)
+            row:SetSkinName(on and AK_SKIN_FIELD or AK_SKIN_PANEL)
+        end
+        local txt = GET_CHILD(frame, "vk_txt_" .. slot.key)
+        if txt then
+            AUTO_CAST(txt)
+            txt:SetText(string.format("{ol}{s13}%s%s", on and "" or "{#999999}",
+                AK_vk_slot_name(slot)))
+        end
+    end
+    local states = {auto = c.auto == 1, jsr = g.settings.vk.jsr == 1,
+                    hp = g.settings.vk.hp_overlay == 1, all = all_on}
+    for key, on in pairs(states) do
+        local icon = GET_CHILD(frame, "vk_t_" .. key)
+        if icon then
+            AUTO_CAST(icon)
+            icon:SetImage(on and "ability_on" or "ability_off")
+            icon:Resize(51, 22)          -- SetImage 가 크기를 되돌린다(테마 §11)
+        end
+    end
+end
+
+function AK_vk_cfg_close()
+    local frame = ui.GetFrame(AK_VK_CFG)
+    if frame then
+        frame:ShowWindow(0)
+    end
+end
+
+function AK_vk_cfg_toggle(frame, ctrl)
+    local c = AK_vk_char()
+    if not ctrl or not c then
+        return
+    end
+    local key = ctrl:GetUserValue("AK_VK_T")
+    if key == "auto" then
+        c.auto = (c.auto == 1) and 0 or 1
+        AK_hud_set_visual()
+    elseif key == "jsr" then
+        g.settings.vk.jsr = (g.settings.vk.jsr == 1) and 0 or 1
+    elseif key == "hp" then
+        g.settings.vk.hp_overlay = (g.settings.vk.hp_overlay == 1) and 0 or 1
+        AK_vk_hp_watch_start()
+    elseif key == "all" then
+        local target = 0
+        for _, slot in ipairs(AK_VK_SLOTS) do
+            if c.slots[slot.key] ~= 1 then
+                target = 1
+                break
+            end
+        end
+        for _, slot in ipairs(AK_VK_SLOTS) do
+            c.slots[slot.key] = target
+        end
+    else
+        return
+    end
+    AK_save_settings()
+    AK_vk_cfg_visual()
+end
+
+-- ⚠️ 원본은 체크 하나를 누를 때마다 설정창을 통째로 다시 그렸다(그래서 창 위치가 튀었고
+-- 위치를 따로 저장해야 했다). 여기서는 상태만 다시 칠한다
+-- ⚠️ the original rebuilt the whole window on every tick, which is why it kept jumping back
+-- 어느 부위인지는 컨트롤에 붙여 둔 UserValue 로 받는다. groupbox 에 ArgString 을 거는 선례는
+-- 클라에 없고(ArgNumber 뿐이다), cupole 의 클릭 셀도 UserValue 방식이라 그쪽을 따른다
+-- the client only has SetEventScriptArgNumber on a groupbox, so the slot key rides a UserValue
+function AK_vk_cfg_slot(frame, ctrl)
+    local c = AK_vk_char()
+    local slot_key = ctrl and ctrl:GetUserValue("AK_VK_SLOT") or nil
+    if not c or slot_key == nil or c.slots[slot_key] == nil then
+        return
+    end
+    c.slots[slot_key] = (c.slots[slot_key] == 1) and 0 or 1
+    -- 보조무기 두 칸은 함께 움직인다(원본과 동일) / the two sub-weapon slots move together
+    if slot_key == "RH_SUB" then
+        c.slots.LH_SUB = c.slots.RH_SUB
+    elseif slot_key == "LH_SUB" then
+        c.slots.RH_SUB = c.slots.LH_SUB
+    end
+    AK_save_settings()
+    AK_vk_cfg_visual()
+end
+
+local function AK_vk_cfg_toggle_icon(frame, key, y, tip)
+    local icon = frame:CreateOrGetControl("picture", "vk_t_" .. key, 51, 22, ui.RIGHT, ui.TOP, 0, y,
+        AK_VK_PAD + 10, 0)
+    AUTO_CAST(icon)
+    icon:SetEnableStretch(1)
+    icon:EnableHitTest(1)
+    icon:SetUserValue("AK_VK_T", key)
+    if tip then
+        icon:SetTextTooltip(tip)
+    end
+    AK_hover(icon)
+    icon:SetEventScript(ui.LBUTTONUP, "AK_vk_cfg_toggle")
+    return icon
+end
+
+local function AK_vk_cfg_label(frame, name, x, y, w, text, tip)
+    local ctrl = frame:CreateOrGetControl("richtext", name, x, y, w, 22)
+    AUTO_CAST(ctrl)
+    ctrl:SetText(text)
+    ctrl:EnableHitTest(false)
+    if tip then
+        ctrl:SetTextTooltip(tip)
+    end
+    return ctrl
+end
+
+function AK_vk_cfg_open()
+    if not g.settings or not AK_vk_char() then
+        return
+    end
+    local frame = ui.GetFrame(AK_VK_CFG)
+    if frame and frame:IsVisible() == 1 then
+        frame:ShowWindow(0)
+        return
+    end
+    if not frame then
+        frame = ui.CreateNewFrame("notice_on_pc", AK_VK_CFG, 0, 0, 0, 0)
+        AUTO_CAST(frame)
+        frame:SetPos((ui.GetClientInitialWidth() - AK_VK_W) / 2,
+            (ui.GetClientInitialHeight() - AK_VK_H) / 2)
+    end
+    AUTO_CAST(frame)
+    frame:RemoveAllChild()
+    frame:Resize(AK_VK_W, AK_VK_H)
+    frame:SetSkinName(AK_UI_SKIN)
+    frame:SetAlpha(AK_UI_ALPHA)
+    frame:SetTitleBarSkin("None")
+    frame:SetLayerLevel(92)
+    frame:EnableHittestFrame(1)
+    frame:EnableMove(1)
+
+    AK_vk_cfg_label(frame, "title", AK_VK_PAD + 2, 10, 260, "{ol}{s18}{b}" .. AK_t("vk_title"))
+    local close = frame:CreateOrGetControl("picture", "close", 28, 28, ui.RIGHT, ui.TOP, 0, 10,
+        AK_VK_PAD, 0)
+    AUTO_CAST(close)
+    close:SetImage("testclose_button")
+    close:SetEnableStretch(1)
+    close:Resize(28, 28)
+    close:SetMargin(0, 10, AK_VK_PAD, 0)
+    close:EnableHitTest(1)
+    AK_hover(close)
+    close:SetEventScript(ui.LBUTTONUP, "AK_vk_cfg_close")
+
+    local line = frame:CreateOrGetControl("labelline", "title_line", AK_VK_PAD, 44,
+        AK_VK_W - AK_VK_PAD * 2, 3)
+    AUTO_CAST(line)
+    line:SetSkinName("labelline2")
+
+    -- 동작 / behaviour
+    local sec1 = AK_vk_cfg_label(frame, "sec1", AK_VK_PAD, 54, 200, "{ol}{s14}" .. AK_t("vk_sec_run"))
+    sec1:SetFontName("white_16_ol")
+    local panel = frame:CreateOrGetControl("groupbox", "panel", AK_VK_PAD, 78,
+        AK_VK_W - AK_VK_PAD * 2, 98)
+    AUTO_CAST(panel)
+    panel:SetSkinName(AK_SKIN_PANEL)
+    panel:EnableScrollBar(0)
+    panel:EnableHittestGroupBox(false)
+
+    local rows = {{key = "auto", label = "vk_auto", tip = "vk_auto_tip"},
+                  {key = "jsr", label = "vk_jsr", tip = "vk_jsr_tip"},
+                  {key = "hp", label = "vk_hp", tip = "vk_hp_tip"}}
+    for i, row in ipairs(rows) do
+        local y = 84 + (i - 1) * 30
+        AK_vk_cfg_label(frame, "lbl_" .. row.key, AK_VK_PAD + 10, y, 210,
+            "{ol}{s13}" .. AK_t(row.label), AK_t(row.tip))
+        AK_vk_cfg_toggle_icon(frame, row.key, y, AK_t(row.tip))
+    end
+
+    -- 탈착할 장비 / gear list
+    local sec2 = AK_vk_cfg_label(frame, "sec2", AK_VK_PAD, 184, 200,
+        "{ol}{s14}" .. AK_t("vk_sec_slots"))
+    sec2:SetFontName("white_16_ol")
+    AK_vk_cfg_toggle_icon(frame, "all", 182, "{ol}" .. AK_t("vk_all"))
+
+    for i, slot in ipairs(AK_VK_SLOTS) do
+        local col, idx = 0, i - 1
+        if i > AK_VK_LEFT_ROWS then
+            col, idx = 1, i - AK_VK_LEFT_ROWS - 1
+        end
+        local x = AK_VK_PAD + col * (AK_VK_COL_W + 6)
+        local y = AK_VK_LIST_Y + idx * AK_VK_SROW
+        local row = frame:CreateOrGetControl("groupbox", "vk_row_" .. slot.key, x, y,
+            AK_VK_COL_W, AK_VK_SROW - 3)
+        AUTO_CAST(row)
+        row:EnableScrollBar(0)
+        row:EnableHittestGroupBox(true)
+        row:SetTextTooltip(AK_t("vk_slot_tip"))
+        row:SetUserValue("AK_VK_SLOT", slot.key)
+        row:SetEventScript(ui.LBUTTONUP, "AK_vk_cfg_slot")
+        -- 글자는 형제로 두고 히트테스트를 끈다 → 클릭은 아래의 groupbox 가 받는다
+        -- the label is a sibling with hit test off, so clicks fall through to the row box
+        AK_vk_cfg_label(frame, "vk_txt_" .. slot.key, x + 10, y + 2, AK_VK_COL_W - 14, "")
+    end
+
+    pcall(AK_credit_render, frame, AK_VK_W, AK_VK_H - 30, AK_VK_PAD)
+    AK_vk_cfg_visual()
+    frame:ShowWindow(1)
+end
+
+-- 우클릭 미니 팝업. 게임 컨텍스트 메뉴는 스킨을 바꿀 수 없어 테마와 안 맞아 직접 그린다.
+-- 방치되면 알아서 사라지도록 SetDuration 을 쓴다(클라 선례: chat_emoticon.lua:54)
+-- a hand-drawn menu (the game context menu cannot be reskinned); SetDuration retires it if ignored
+function AK_vk_menu_close()
+    local frame = ui.GetFrame(AK_VK_MENU)
+    if frame then
+        frame:ShowWindow(0)
+    end
+end
+
+function AK_vk_menu_auto()
+    local c = AK_vk_char()
+    AK_vk_menu_close()
+    if not c then
+        return
+    end
+    c.auto = (c.auto == 1) and 0 or 1
+    AK_save_settings()
+    AK_hud_set_visual()
+    AK_vk_cfg_visual()
+    CHAT_SYSTEM(string.format("[Auto Keeper] %s : %s", AK_t("vk_auto"),
+        c.auto == 1 and AK_t("on") or AK_t("off")))
+end
+
+function AK_vk_menu_cfg()
+    AK_vk_menu_close()
+    AK_vk_cfg_open()
+end
+
+local function AK_vk_menu_row(frame, name, y, text, handler)
+    local box = frame:CreateOrGetControl("groupbox", name .. "_bg", 6, y, AK_VK_MENU_W - 12,
+        AK_VK_MENU_ROW - 3)
+    AUTO_CAST(box)
+    box:EnableScrollBar(0)
+    box:EnableHittestGroupBox(true)
+    -- 마우스를 올리면 더 투명해진다 = 지금 고르고 있는 행
+    AK_skin_hover(box, AK_SKIN_PANEL, AK_SKIN_HOVER_ROW)
+    box:SetEventScript(ui.LBUTTONUP, handler)
+    local txt = frame:CreateOrGetControl("richtext", name, 16, y + 3, AK_VK_MENU_W - 26, 20)
+    AUTO_CAST(txt)
+    txt:SetText(text)
+    txt:EnableHitTest(false)
+end
+
+function AK_vk_menu_open(icon)
+    local c = AK_vk_char()
+    if not c or not icon then
+        return
+    end
+    local frame = ui.GetFrame(AK_VK_MENU)
+    if frame and frame:IsVisible() == 1 then
+        frame:ShowWindow(0)
+        return
+    end
+    if not frame then
+        frame = ui.CreateNewFrame("notice_on_pc", AK_VK_MENU, 0, 0, 0, 0)
+    end
+    AUTO_CAST(frame)
+    frame:RemoveAllChild()
+    local h = AK_VK_MENU_ROW * 2 + 12
+    frame:Resize(AK_VK_MENU_W, h)
+    frame:SetSkinName(AK_UI_SKIN)
+    frame:SetAlpha(AK_UI_ALPHA)
+    frame:SetTitleBarSkin("None")
+    frame:SetLayerLevel(95)
+    frame:EnableHittestFrame(1)
+    frame:EnableMove(0)
+    -- 아이콘 바로 아래에 붙인다. GetGlobalX/Y 를 못 읽는 환경이면 HUD 바 좌표로 대신한다
+    -- anchored under the icon, falling back to the HUD bar position
+    local ok, gx, gy = pcall(function() return icon:GetGlobalX(), icon:GetGlobalY() end)
+    if ok and gx ~= nil and gy ~= nil then
+        frame:SetPos(math.max(0, gx - (AK_VK_MENU_W - AK_ICON) / 2), gy + AK_ICON + 4)
+    else
+        frame:SetPos(g.settings.hud_x, g.settings.hud_y + AK_HUD_H + 4)
+    end
+
+    AK_vk_menu_row(frame, "menu_auto", 6, string.format("{ol}{s13}%s : %s", AK_t("vk_auto"),
+        c.auto == 1 and AK_t("on") or AK_t("off")), "AK_vk_menu_auto")
+    AK_vk_menu_row(frame, "menu_cfg", 6 + AK_VK_MENU_ROW, "{ol}{s13}" .. AK_t("vk_menu_cfg"),
+        "AK_vk_menu_cfg")
+
+    frame:ShowWindow(1)
+    frame:SetDuration(6)
+end
+
 function AK_hud_rclick(frame, ctrl)
     if not ctrl then
         return
     end
-    if ctrl:GetUserValue("AK_KEY") == "repair" then
+    local key = ctrl:GetUserValue("AK_KEY")
+    if key == "repair" then
         AK_cfg_open()
+    elseif key == "vakarine" then
+        AK_vk_menu_open(ctrl)
     end
 end
 
@@ -1294,6 +2429,8 @@ function AK_hud_drag(frame)
     if not frame or not g.settings then
         return
     end
+    -- 바가 움직이면 아이콘에 붙어 있던 팝업은 자리를 잃는다 / the popup is anchored to the icon
+    AK_vk_menu_close()
     g.settings.hud_x = frame:GetX()
     g.settings.hud_y = frame:GetY()
     AK_save_settings()
@@ -1368,9 +2505,11 @@ function AK_hud_create()
             tip = tip .. "{nl}" .. AK_t("tip_rclick")
         end
         icon:SetTextTooltip(string.format("%s{nl}%s", AK_t(f.label), tip))
-        icon:SetEventScript(ui.LBUTTONUP, "AK_hud_toggle")
-        -- 수리만 우클릭으로 설정창을 연다 / only repair opens a settings window on right click
-        if f.key == "repair" then
+        -- 🔑 바카리네만 좌클릭이 on/off 토글이 아니라 "지금 실행"이다. 켜고 끄는 것(자동 실행)은
+        -- 우클릭 팝업으로 간다 / the Vakarine icon runs the swap instead of toggling
+        icon:SetEventScript(ui.LBUTTONUP, f.manual and "AK_vk_manual" or "AK_hud_toggle")
+        -- 수리와 바카리네가 우클릭을 쓴다 / repair and Vakarine both use right click
+        if f.key == "repair" or f.manual then
             icon:SetEventScript(ui.RBUTTONUP, "AK_hud_rclick")
         end
     end
@@ -1471,6 +2610,25 @@ function AK_dump_dur()
         #out > 0 and table.concat(out, ", ") or "-"))
 end
 
+-- 진단용 `/keeper vk`. 자동 실행이 안 도는 이유는 셋 중 하나다: 캐릭터 설정이 꺼졌거나,
+-- 바카리네 5세트가 아니거나, 맵이 대상이 아니거나. 세 판정을 그대로 찍는다
+-- diagnostic: the three gates the auto run has to pass, printed as-is
+function AK_dump_vk()
+    local c = AK_vk_char()
+    local picked = 0
+    if c then
+        for _, slot in ipairs(AK_VK_SLOTS) do
+            if c.slots[slot.key] == 1 then
+                picked = picked + 1
+            end
+        end
+    end
+    local map_type, keyword = AK_vk_map_type()
+    CHAT_SYSTEM(string.format("[Auto Keeper] auto %s | set %s | map %s(%s) ok %s | slots %d | jsr %s",
+        tostring(c ~= nil and c.auto == 1), tostring(AK_vk_is_set()), tostring(map_type),
+        tostring(keyword), tostring(AK_vk_map_ok()), picked, tostring(g.settings.vk.jsr == 1)))
+end
+
 function AK_SLASH(command)
     if not g.settings then
         return
@@ -1481,6 +2639,10 @@ function AK_SLASH(command)
     end
     if command ~= nil and command[1] == "dur" then
         AK_dump_dur()
+        return
+    end
+    if command ~= nil and command[1] == "vk" then
+        AK_dump_vk()
         return
     end
     g.settings.hud_open = (g.settings.hud_open == 1) and 0 or 1
@@ -1512,6 +2674,11 @@ end
 function AK_GAME_START()
     g.ready = false
     g.active_id = tostring(session.loginInfo.GetAID())
+    -- 바카리네 설정은 캐릭터별이다. json 키는 문자열이므로 여기서 문자열로 맞춰 둔다
+    -- per-character settings key; json object keys are strings, so normalise it here
+    local ok_cid, cid = pcall(function() return session.GetMySession():GetCID() end)
+    g.cid = (ok_cid and cid ~= nil) and tostring(cid) or nil
+    g.vk_dirty = true
     AK_create_folder("../addons")
     AK_create_folder("../addons/" .. addonNameLower)
     AK_create_folder("../addons/" .. addonNameLower .. "/" .. g.active_id)
@@ -1530,15 +2697,22 @@ function AK_GAME_START()
         g.addon:RegisterMsg("PC_PROPERTY_UPDATE", "AK_STA_UPDATE")
         g.addon:RegisterMsg("BUFF_ADD", "AK_BUFF_MSG")
         g.addon:RegisterMsg("BUFF_UPDATE", "AK_BUFF_MSG")
+        -- 체력바 오버레이는 체력이 움직이는 순간에 바로 갱신한다(§5). 원본과 같은 세 메시지지만
+        -- 안에서 장비를 훑지 않으므로 비용이 다르다
+        -- the HP overlay refreshes the moment HP moves; unlike the original, no scan inside
+        g.addon:RegisterMsg("STAT_UPDATE", "AK_VK_HP_MSG")
+        g.addon:RegisterMsg("TAKE_DAMAGE", "AK_VK_HP_MSG")
+        g.addon:RegisterMsg("TAKE_HEAL", "AK_VK_HP_MSG")
         -- durnotify 가 구독하는 것과 같은 원본 메시지들(durnotify.lua:4-7).
         -- 게임 알림창을 훅하지 않으므로 그 UI 는 그대로 살아 있다
         -- the same sources durnotify subscribes to; its UI stays intact because we never hook it
         g.addon:RegisterMsg("UPDATE_ITEM_REPAIR", "AK_DUR_CHECK")
         g.addon:RegisterMsg("ITEM_PROP_UPDATE", "AK_DUR_CHECK")
         g.addon:RegisterMsg("EQUIP_ITEM_LIST_GET", "AK_DUR_CHECK")
-        -- HUD 가 TP 상점 때문에 닫혔을 때 되살리는 보조 경로 (ESC 로 닫는 경우)
-        -- restores the HUD after the TP shop closed it, for the ESC path
-        g.addon:RegisterMsg("ESCAPE_PRESSED", "AK_hud_guard")
+        -- HUD 가 TP 상점 때문에 닫혔을 때 되살리는 보조 경로 (ESC 로 닫는 경우) +
+        -- ESC 로 바카리네 팝업 닫기. 한 메시지에 핸들러 하나만 걸어 중복 등록을 피한다
+        -- restores the HUD after the TP shop closed it, and closes the Vakarine popup
+        g.addon:RegisterMsg("ESCAPE_PRESSED", "AK_ESCAPE")
     end
 
     AK_hud_create()
@@ -1546,6 +2720,14 @@ function AK_GAME_START()
     AK_sta_watch_start()
     AK_potion_watch_start()
     AK_repair_watch_start()
+    AK_vk_hp_watch_start()
+    AK_vk_nexus_warn()
+
+    -- 바카리네 자동 실행: 지금(GAME_START_3SEC)부터 시도하고, 장비 목록이 오는 즉시 실행한다
+    -- start trying right now, and go the moment the equip list is there
+    g.vk_auto_try = 0
+    g.frame:StopUpdateScript("AK_vk_auto_tick")
+    g.frame:RunUpdateScript("AK_vk_auto_tick", AK_VK_AUTO_GAP)
 
     g.frame:StopUpdateScript("AK_hud_guard_tick")
     g.frame:RunUpdateScript("AK_hud_guard_tick", 2.0)
@@ -1555,8 +2737,24 @@ function AK_GAME_START()
     CHAT_SYSTEM(AK_t("loaded"))
 end
 
+function AK_ESCAPE()
+    AK_vk_menu_close()
+    AK_hud_guard()
+end
+
+-- ⚠️ 여기서 바카리네 자동 실행을 부르던 것을 뺐다. 이 유예(5초)는 **스태미나**가 로딩 중
+-- 잘못 읽히는 것을 막으려는 것이지 장비와는 무관한데, 그대로 얹는 바람에
+-- GAME_START_3SEC(3초) + 5초 = 약 8초가 되어 원본보다 눈에 띄게 느려졌다.
+-- 지금은 AK_vk_auto_tick 이 3초 시점부터 장비 목록을 보고 준비되는 즉시 실행한다
+-- ⚠️ the auto run used to hang off this 5s grace, which exists for stamina, not equipment -
+-- that made it ~8s after map entry. it now starts as soon as the equip list is actually there
 function AK_ready_on(frame)
     g.ready = true
     frame:StopUpdateScript("AK_ready_on")
+    -- 탈착 때 애니무스로 바꿔 끼우지 못했으면 도시에서 다시 시도한다(원본과 같은 자리)
+    if g.vk_animus and AK_vk_map_type() == "City" then
+        g.frame:StopUpdateScript("AK_vk_animus_tick")
+        g.frame:RunUpdateScript("AK_vk_animus_tick", 1.0)
+    end
     return 0
 end
