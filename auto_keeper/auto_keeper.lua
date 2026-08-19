@@ -69,7 +69,7 @@ local AK_LANG = {
         -- ⚠️ 이 문자열은 SetTextTooltip 으로 **그대로** 넘어간다(string.format 을 타지 않는다).
         -- %% 로 이스케이프하면 화면에 %% 가 그대로 찍힌다. tip_stamina 류만 format 을 탄다
         -- ⚠️ passed straight to SetTextTooltip, so %% would render literally as %%
-        vk_hp_tip = "{ol}체력바 위에 HP % 와 완벽/복수 표시를 띄웁니다{nl}복수 기준은 바카리네 5세트면 45%, 아니면 35% 입니다",
+        vk_hp_tip = "{ol}체력바 위에 HP % 와 완벽/복수 표시를 띄웁니다{nl}복수 : 바카리네 5세트면 45% 이하, 5세트 미만이면 복수 수치가 있을 때 35% 이하{nl}완벽 : 완벽함 수치가 있을 때 100%",
         hp_perfect = "완벽",
         hp_revenge = "복수",
         vk_all = "전체 선택 / 해제",
@@ -121,7 +121,7 @@ local AK_LANG = {
         vk_jsr = "週間ボスレイドでも",
         vk_jsr_tip = "{ol}JSR(ボス協同戦) = 週間ボスレイドのマップ8種{nl}通常のインスタンスダンジョンはこの設定に関係なく作動します",
         vk_hp = "HPバーに状態を表示",
-        vk_hp_tip = "{ol}HPバーの上に HP % と Perfect / Revenge を表示します{nl}Revenge の基準は5セットなら45%、それ以外は35% です",
+        vk_hp_tip = "{ol}HPバーの上に HP % と Perfect / Revenge を表示します{nl}Revenge : 5セットなら45%以下、5セット未満はrevenge値がある場合35%以下{nl}Perfect : perfection値がある場合100%",
         hp_perfect = "Perfect",
         hp_revenge = "Revenge",
         vk_all = "全選択 / 全解除",
@@ -173,7 +173,7 @@ local AK_LANG = {
         vk_jsr = "Weekly boss raids too",
         vk_jsr_tip = "{ol}JSR (boss co-op) = the 8 weekly boss raid maps{nl}Regular instance dungeons run regardless of this",
         vk_hp = "Show status on the HP bar",
-        vk_hp_tip = "{ol}Draws HP % and Perfect / Revenge above the HP bar{nl}Revenge triggers at 45% with the 5-piece set, 35% without it",
+        vk_hp_tip = "{ol}Draws HP % and Perfect / Revenge above the HP bar{nl}Revenge: at or below 45% with the 5-piece set, or below 35% with a revenge value{nl}Perfect: at 100% with a perfection value",
         hp_perfect = "Perfect",
         hp_revenge = "Revenge",
         vk_all = "Select / clear all",
@@ -342,10 +342,37 @@ local AK_VK_MAP_EXTRA = {[8022] = true, [11244] = true}
 local AK_VK_HP_SET = 0.45
 local AK_VK_HP_PLAIN = 0.35
 local AK_VK_SET_COUNT = 5            -- 이만큼 붙어 있어야 "5세트" / pieces needed
+-- 🔑 완벽함 / 복수는 버프가 아니라 **착용 장비 랜덤옵션 수치의 합**이다 — 스탯창의 "특수 옵션".
+-- 그래서 HP 만 보고 띄우면 옵션이 없는 캐릭터에게도 뜨는 거짓 표시가 된다(사용자 지적).
+-- 값은 클라가 스탯창에서 쓰는 함수를 그대로 불러 얻는다:
+--   GET_SPECIAL_OPTION_VALUE(pc, name)  (status.lua:1571)
+--   RandomOption_j 가 이름과 **정확히 같을 때** RandomOptionValue_j 를 더한다(부분 일치 아님).
+--   perfection / revenge 는 status.lua 의 special_option_list 에 등록된 이름 그대로다
+-- 🔑 these are not buffs: they are the summed random-option values on the equipped gear, which is
+-- what the status window calls a special option. The client's own summing function is reused
+local AK_VK_OPT_PERFECTION = "perfection"
+local AK_VK_OPT_REVENGE = "revenge"
+-- 수치가 이 값 이상이면 "그 옵션을 갖고 있다"로 본다. 정수 합이므로 1 = 0보다 크다와 같다
+-- treated as present at this value or above; the total is an integer, so 1 means "greater than 0"
+local AK_VK_OPT_MIN = 1
+-- 특수 옵션·세트 판정 캐시의 유효 시간(초).
+-- 🔑 캐시는 "장비가 바뀌었다"는 메시지로 무효화하는데, **아이커 교체는 장비 자체가 안 바뀌어서
+-- 그 메시지가 오지 않는다**(실제로 완벽함이 갱신되지 않았다). 아래에 아이커 메시지를 따로 구독했지만
+-- 카드·초월 등 다른 경로를 전부 잡았다고 보장할 수 없으므로, **시간이 지나면 스스로 다시 잰다.**
+-- 어떤 경로를 놓쳐도 최대 이 시간 안에 맞춰진다
+-- 🔑 the cache is invalidated by equipment-change messages, but swapping an icor does not change
+-- the item itself and sends none of them. the icor messages are subscribed below, but this TTL is
+-- what makes any missed path self-heal
+local AK_VK_CACHE_TTL = 5.0
 -- 체력바 위 글자 크기. 숫자(%)와 상태(완벽/복수)를 따로 둔다 — 상태 쪽만 작게 해달라는 요청
 -- separate sizes: only the status word was asked to be smaller
 local AK_VK_HP_SIZE = "{s15}"        -- 체력 % 숫자 / the percentage
 local AK_VK_STATUS_SIZE = "{s12}"    -- 완벽 / 복수 / the status word
+-- 체력바 위로 얼마나 띄우는가(px). 값이 작을수록 아래로 내려온다.
+-- 상태 글자를 작게 줄인 뒤 너무 높아 보인다는 피드백으로 25 → 21
+-- how far above the gauge each line sits; smaller = lower. 25 -> 21 after the font shrank
+local AK_VK_STATUS_DY = 21
+local AK_VK_HP_DY = 10
 
 -- ============================================================
 -- HUD 레이아웃 / HUD layout
@@ -1172,6 +1199,14 @@ function AK_DUR_CHECK()
     AK_repair_try()
 end
 
+-- 아이커 교체·장착·해제. 장비 자체는 그대로라 EQUIP_ITEM_LIST_GET 이 오지 않으므로
+-- 특수 옵션(완벽함·복수) 캐시를 여기서 따로 무효화한다
+-- swapping an icor changes the random options without changing the item, so the equipment
+-- messages never fire; this is the path that catches it
+function AK_VK_OPT_DIRTY()
+    g.vk_dirty = true
+end
+
 -- 🔑 안전 타이머. 물약과 같은 이유다: 메시지만 믿으면 그 메시지가 안 오는 상황에서 기능이
 -- 통째로 죽는다. 내구도는 전투 중 조금씩 닳는데 클라가 그때마다 아이템 속성 갱신을 보내는지는
 -- 우리가 보장할 수 없다. 5초마다 스스로 판정하면 그 구멍이 없어진다
@@ -1313,10 +1348,24 @@ end
 -- 때만 다시 계산하고 나머지는 캐시를 읽는다
 -- 🔑 an expensive scan the original ran on every hit taken; now it is recomputed only when an
 -- equipment change is signalled, and read from cache otherwise
-local function AK_vk_scan_set()
+-- 특수 옵션 수치를 클라 함수로 얻는다. 0 이면 그 옵션이 아예 없다는 뜻이다
+-- reads a special option's total through the client's own function; 0 means absent
+function AK_vk_special(name)
+    local pc = GetMyPCObject()
+    if not pc then
+        return 0
+    end
+    local ok, value = pcall(GET_SPECIAL_OPTION_VALUE, pc, name)
+    return (ok and tonumber(value)) or 0
+end
+
+-- 한 번에 세 가지를 낸다: 5세트인가 / 완벽함 수치 / 복수 수치.
+-- 셋 다 장비에만 달려 있으므로 같은 캐시에 얹는다
+-- three verdicts in one go; all of them depend on equipment only, so they share the cache
+local function AK_vk_scan()
     local list = session.GetEquipItemList()
     if not list then
-        return false
+        return false, 0, 0
     end
     local guids = list:GetGuidList()
     local worn = 0
@@ -1336,24 +1385,47 @@ local function AK_vk_scan_set()
             end
         end
     end
-    return worn >= AK_VK_SET_COUNT
+    return worn >= AK_VK_SET_COUNT,
+        AK_vk_special(AK_VK_OPT_PERFECTION),
+        AK_vk_special(AK_VK_OPT_REVENGE)
+end
+
+-- 캐시 갱신. 반환: 5세트인가, 완벽함 수치, 복수 수치
+-- ⚠️ 장비 목록이 아직 안 왔으면 **캐시하지 않는다.** 여기서 false 를 굳혀 버리면 그 뒤
+-- 자동 실행이 계속 "5세트 아님"으로 판정된다. 접속 직후에는 체력바 오버레이 타이머가
+-- 이 함수를 먼저 부르므로 실제로 일어날 수 있는 순서다
+-- ⚠️ never cache a verdict taken from an empty equip list: the HP overlay timer calls this
+-- first after login, and a cached false would suppress the auto run for good
+local function AK_vk_refresh()
+    local now = imcTime.GetAppTime()
+    local stale = g.vk_at == nil or (now - g.vk_at) > AK_VK_CACHE_TTL
+    if g.vk_set == nil or g.vk_dirty or stale then
+        if not AK_vk_equip_ready() then
+            return false, 0, 0
+        end
+        local ok, is_set, perfection, revenge = pcall(AK_vk_scan)
+        g.vk_set = (ok and is_set) or false
+        g.vk_perfection = (ok and perfection) or 0
+        g.vk_revenge = (ok and revenge) or 0
+        g.vk_dirty = false
+        g.vk_at = now
+    end
+    return g.vk_set, g.vk_perfection, g.vk_revenge
 end
 
 function AK_vk_is_set()
-    if g.vk_set == nil or g.vk_dirty then
-        -- ⚠️ 장비 목록이 아직 안 왔으면 **캐시하지 않는다.** 여기서 false 를 굳혀 버리면 그 뒤
-        -- 자동 실행이 계속 "5세트 아님"으로 판정된다. 접속 직후에는 체력바 오버레이 타이머가
-        -- 이 함수를 먼저 부르므로 실제로 일어날 수 있는 순서다
-        -- ⚠️ never cache a verdict taken from an empty equip list: the HP overlay timer calls this
-        -- first after login, and a cached false would suppress the auto run for good
-        if not AK_vk_equip_ready() then
-            return false
-        end
-        local ok, worn = pcall(AK_vk_scan_set)
-        g.vk_set = (ok and worn) or false
-        g.vk_dirty = false
-    end
-    return g.vk_set
+    local is_set = AK_vk_refresh()
+    return is_set
+end
+
+function AK_vk_perfection()
+    local _, perfection = AK_vk_refresh()
+    return perfection or 0
+end
+
+function AK_vk_revenge()
+    local _, _, revenge = AK_vk_refresh()
+    return revenge or 0
 end
 
 local function AK_vk_map_type()
@@ -1707,14 +1779,24 @@ local function AK_vk_hp_refresh()
     AUTO_CAST(gauge)
     local pct = stat.HP * 100 / stat.maxHP
     local color, status = "#FFFFFF", ""
-    if pct >= 100 then
+    local is_set = AK_vk_is_set()
+    -- 🔑 조건은 세 갈래다(사용자 정정, 2026-08-20):
+    --   완벽 : 완벽함 수치 >= 1  그리고 HP 100%
+    --   복수 : 바카리네 **5세트**  그리고 HP <= 45%  ← 세트 자체가 조건이라 수치를 보지 않는다
+    --   복수 : 5세트 **미만** + 복수 수치 >= 1  그리고 HP <= 35%
+    -- ⚠️ 5세트일 때도 복수 수치를 요구하던 것이 틀렸다. 두 경우는 임계선도 다르다
+    -- 🔑 three cases; the 5-piece set does not need a revenge value of its own, and the two
+    -- revenge cases use different HP thresholds
+    if pct >= 100 and AK_vk_perfection() >= AK_VK_OPT_MIN then
         color, status = "#00EC00", AK_t("hp_perfect")
-    elseif pct <= (AK_vk_is_set() and AK_VK_HP_SET or AK_VK_HP_PLAIN) * 100 then
+    elseif is_set and pct <= AK_VK_HP_SET * 100 then
+        color, status = "#EA0000", AK_t("hp_revenge")
+    elseif not is_set and AK_vk_revenge() >= AK_VK_OPT_MIN and pct <= AK_VK_HP_PLAIN * 100 then
         color, status = "#EA0000", AK_t("hp_revenge")
     end
-    AK_vk_hp_text(base, "ak_vk_status", gauge, 25,
+    AK_vk_hp_text(base, "ak_vk_status", gauge, AK_VK_STATUS_DY,
         string.format("{ol}%s{%s}%s", AK_VK_STATUS_SIZE, color, status))
-    AK_vk_hp_text(base, "ak_vk_hp", gauge, 10,
+    AK_vk_hp_text(base, "ak_vk_hp", gauge, AK_VK_HP_DY,
         string.format("{ol}%s{%s}%d%%", AK_VK_HP_SIZE, color, pct))
 end
 
@@ -2614,6 +2696,7 @@ end
 -- 바카리네 5세트가 아니거나, 맵이 대상이 아니거나. 세 판정을 그대로 찍는다
 -- diagnostic: the three gates the auto run has to pass, printed as-is
 function AK_dump_vk()
+    g.vk_dirty = true          -- 진단은 캐시를 믿지 않고 지금 다시 잰다 / always re-measure
     local c = AK_vk_char()
     local picked = 0
     if c then
@@ -2624,9 +2707,59 @@ function AK_dump_vk()
         end
     end
     local map_type, keyword = AK_vk_map_type()
-    CHAT_SYSTEM(string.format("[Auto Keeper] auto %s | set %s | map %s(%s) ok %s | slots %d | jsr %s",
+    CHAT_SYSTEM(string.format(
+        "[Auto Keeper] auto %s | set %s | map %s(%s) ok %s | slots %d | jsr %s | 완벽함 %s / 복수 %s",
         tostring(c ~= nil and c.auto == 1), tostring(AK_vk_is_set()), tostring(map_type),
-        tostring(keyword), tostring(AK_vk_map_ok()), picked, tostring(g.settings.vk.jsr == 1)))
+        tostring(keyword), tostring(AK_vk_map_ok()), picked, tostring(g.settings.vk.jsr == 1),
+        tostring(AK_vk_perfection()), tostring(AK_vk_revenge())))
+end
+
+-- 진단용 /keeper opt. 스탯창이 보여주는 특수 옵션 수치(완벽함·복수)를 찍고,
+-- 이어서 착용 장비에 붙은 바카리네 랜덤옵션 문자열을 그대로 찍는다.
+-- 체력바 표시가 안 뜨는 이유는 대개 "그 옵션 수치가 0" 이다
+-- prints the special option totals the status window shows, then the raw option strings
+function AK_dump_opt()
+    g.vk_dirty = true          -- 진단은 캐시를 믿지 않고 지금 다시 잰다 / always re-measure
+    CHAT_SYSTEM(string.format("[AK opt] %s=%s  %s=%s  (0 이면 그 표시는 뜨지 않습니다)",
+        AK_VK_OPT_PERFECTION, tostring(AK_vk_perfection()),
+        AK_VK_OPT_REVENGE, tostring(AK_vk_revenge())))
+    local list = session.GetEquipItemList()
+    if not list then
+        CHAT_SYSTEM("[Auto Keeper] 장비 목록을 읽을 수 없습니다.")
+        return
+    end
+    local guids = list:GetGuidList()
+    local shown = 0
+    for i = 0, guids:Count() - 1 do
+        local guid = guids:Get(i)
+        if guid ~= "0" then
+            local equip = list:GetItemByGuid(guid)
+            local obj = equip and GetIES(equip:GetObject())
+            if obj then
+                local found = {}
+                for j = 1, MAX_OPTION_EXTRACT_COUNT do
+                    local raw = obj["RandomOption_" .. j]
+                    if raw ~= nil and raw ~= "" and raw ~= "None" then
+                        local ok, msg = pcall(ScpArgMsg, raw)
+                        local out = (ok and msg) or "?"
+                        -- Vakarine / vakarine / bakarine 을 한 번에 잡는다
+                        if string.find(tostring(raw), "akarine") ~= nil or
+                            string.find(tostring(out), "akarine") ~= nil then
+                            table.insert(found, string.format("%s -> %s", tostring(raw), tostring(out)))
+                        end
+                    end
+                end
+                if #found > 0 then
+                    shown = shown + 1
+                    CHAT_SYSTEM(string.format("[AK opt] %s : %s", tostring(obj.Name or "?"),
+                        table.concat(found, " | ")))
+                end
+            end
+        end
+    end
+    if shown == 0 then
+        CHAT_SYSTEM("[Auto Keeper] 바카리네 옵션이 붙은 착용 장비를 찾지 못했습니다.")
+    end
 end
 
 function AK_SLASH(command)
@@ -2643,6 +2776,10 @@ function AK_SLASH(command)
     end
     if command ~= nil and command[1] == "vk" then
         AK_dump_vk()
+        return
+    end
+    if command ~= nil and command[1] == "opt" then
+        AK_dump_opt()
         return
     end
     g.settings.hud_open = (g.settings.hud_open == 1) and 0 or 1
@@ -2709,6 +2846,14 @@ function AK_GAME_START()
         g.addon:RegisterMsg("UPDATE_ITEM_REPAIR", "AK_DUR_CHECK")
         g.addon:RegisterMsg("ITEM_PROP_UPDATE", "AK_DUR_CHECK")
         g.addon:RegisterMsg("EQUIP_ITEM_LIST_GET", "AK_DUR_CHECK")
+        -- 아이커 교체 계열. 이름은 goddess_equip_manager / icoradd_multiple /
+        -- icorrelease_multiple 이 실제로 구독하는 것과 같다
+        -- the same names the client's own icor windows subscribe to
+        g.addon:RegisterMsg("MSG_SUCCESS_ICOR_PRESET_ENGRAVE_APPLY", "AK_VK_OPT_DIRTY")
+        g.addon:RegisterMsg("MSG_SUCCESS_ICOR_ADD_MULTIPLE", "AK_VK_OPT_DIRTY")
+        g.addon:RegisterMsg("MSG_SUCCESS_ICOR_RELEASE_MULTIPLE", "AK_VK_OPT_DIRTY")
+        g.addon:RegisterMsg("MSG_SUCCESS_ICOR_RELEASE_RANDOM_MULTIPLE", "AK_VK_OPT_DIRTY")
+        g.addon:RegisterMsg("MSG_GODDESS_SOCKET_UPDATE", "AK_VK_OPT_DIRTY")
         -- HUD 가 TP 상점 때문에 닫혔을 때 되살리는 보조 경로 (ESC 로 닫는 경우) +
         -- ESC 로 바카리네 팝업 닫기. 한 메시지에 핸들러 하나만 걸어 중복 등록을 피한다
         -- restores the HUD after the TP shop closed it, and closes the Vakarine popup
