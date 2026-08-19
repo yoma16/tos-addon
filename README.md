@@ -48,6 +48,8 @@ tos-addon/
 │  └─ RELEASE_v1.0.2.md    # 릴리즈 노트 (이후 버전은 GitHub Release 참고)
 ├─ toggle_cupole_potion/   # 쿠폴 자동 물약 토글
 ├─ auto_ads/               # 확성기/채팅 자동 전송
+├─ auto_keeper/            # 자동 관리 HUD (스태미나/물약/성물/수리/바카리네)
+├─ convenient_hud/         # 편의 설정 HUD (이펙트·자동시전·큐폴물약)
 ├─ new_nexus_addons/       # Nexus Addons 번들 (yomae 포크)
 ├─ addons.json             # 애드온 매니저용 매니페스트 (버전/릴리즈 태그/설명)
 └─ README.md
@@ -111,6 +113,112 @@ An addon that automatically sends a specified message at regular intervals.
 ## Notes
 - 외침(`/y`) 사용 시 확성기 아이템이 필요합니다. (Megaphone item required for Shout channel)
 - 실행 중 UI를 닫으면 자동으로 정지됩니다. (Closing the UI while running will auto-stop)
+
+---
+
+# Auto Keeper
+
+반복되는 관리 작업 다섯 가지를 HUD 아이콘 하나씩으로 켜고 끄는 애드온입니다.
+Five upkeep chores on one HUD bar, each toggled by its own icon.
+
+## 주요 기능 / Features
+
+| 아이콘 / Icon | 동작 / What it does |
+|---|---|
+| 스태미나 알약 / Stamina pills | 스태미나가 최대치의 **20% 이하**면 알약을 한 알씩 먹습니다. 도시와 이벤트 맵에서는 동작하지 않습니다<br>Eats one pill at a time below 20%; does nothing in cities or event maps |
+| 물약 회복 버프 해제 / Potion heal buff | 체력이 **40% 이상**이 되면 물약 회복 버프를 해제합니다<br>Removes the potion heal buff once HP is back at 40% or above |
+| 성물 마력 보완 충전 / Relic power | 던전 입장창에서 마력이 덜 찼으면 엑토나이트로 채웁니다<br>Fills relic power with Ectonite at the dungeon entry window |
+| 장비 자동 수리 / Gear repair | 내구도가 **30% 미만**인 장비를 긴급 수리 키트로 수리하고, 부족하면 필요한 수량만큼만 자동 구매합니다(설정에서 켜야 동작)<br>Repairs gear under 30% durability, buying only as many kits as the repair needs (auto-buy must be switched on) |
+| 바카리네 장비 탈착 / Vakarine gear | 인스턴스 던전에 들어가면 선택한 부위를 벗었다가 다시 착용합니다. 바카리네 축복 5세트를 착용했을 때만 동작합니다<br>Unequips and re-equips the slots you picked on instance dungeon entry, only with the 5-piece Vakarine blessing set |
+
+- **기본값은 전부 꺼짐**입니다. 아이템을 소비하는 기능이라 직접 켜야 합니다
+  Everything is off by default because it all spends items
+- 아이콘을 누르면 켜짐/꺼짐이 색으로 바뀌고, 마우스를 올리면 밝아집니다
+  Click an icon to switch it on or off; it brightens on mouse over
+- **수리 아이콘 우클릭** → 수리 키트 자동 구매 설정(1회 최대 구매 수량 지정 가능)
+  Right click the repair icon for the auto-buy settings
+- **바카리네 아이콘은 조작이 다릅니다** — 좌클릭은 지금 실행, 우클릭은 `자동 실행 켜기/끄기`와 설정창입니다
+  The Vakarine icon differs: left click runs it now, right click opens auto-run on/off and its settings
+- HUD는 드래그로 옮기면 위치가 저장되고, `/keeper` 로 표시를 켜고 끕니다
+  Drag the bar to move it; `/keeper` shows or hides it
+
+## 바카리네 설정창 / Vakarine settings
+
+- **맵 진입 시 자동 실행** — 캐릭터별로 저장됩니다 (Auto run on map entry, saved per character)
+- **주간 보스 레이드에서도** — JSR 8종 맵 포함 여부. 일반 인스턴스 던전은 이 설정과 무관하게 동작합니다
+  (Whether the 8 weekly boss raid maps count; ordinary instance dungeons always run)
+- **탈착할 장비** — 부위를 눌러 켜고 끕니다. 목걸이를 고르면 애니무스는 맨 마지막에 처리합니다
+  (Pick the slots; with the necklace selected, the Animus is handled last)
+- **체력바에 상태 표시** — 체력바 위에 HP % 와 완벽/복수를 띄웁니다
+  (HP percentage plus Perfect / Revenge above the HP bar)
+
+| 표시 / Label | 조건 / Condition |
+|---|---|
+| 완벽 / Perfect | 완벽함 수치가 있을 때 체력 100% (perfection value present, HP at 100%) |
+| 복수 / Revenge | 5세트면 체력 45% 이하, 5세트 미만이면 복수 수치가 있을 때 35% 이하 (45% with the 5-piece set, 35% with a revenge value and fewer pieces) |
+
+## 진단 명령 / Diagnostics
+
+- `/keeper buff` — 지금 붙어 있는 버프 ID 목록 (current buff ids)
+- `/keeper dur` — 수리 키트 수량·쿨다운·장비별 내구도 (kit count, cooldown, per-slot durability)
+- `/keeper vk` — 바카리네 자동 실행이 안 도는 이유 (why auto run is not firing)
+- `/keeper opt` — 스탯창 특수 옵션 수치(완벽함·복수) (the perfection / revenge values)
+
+## 저장 경로 / Save Path
+
+- `../addons/auto_keeper/<AID>/auto_keeper.json`
+
+## ⚠️ 먼저 꺼 주세요 / Turn these off first
+
+같은 일을 하는 애드온을 함께 쓰면 **아이템을 두 배로 소모합니다.**
+Two copies of the same job burn twice the items.
+
+- `autostamina` / `no_potion` → `.ipf` 를 `data/` 에서 빼 주세요 (remove the `.ipf` from `data/`)
+- Nexus Addons 의 **Auto Repair**, **Vakarine Equip** → 설정에서 끄기 (switch off in its settings)
+- mini_addons 의 **성물 자동충전** → 설정에서 끄기 (switch off in its settings)
+
+> 게임 기본 옵션인 `성물(마력) 자동충전` 은 **그대로 켜 두세요.** 이 애드온은 그것을 대체하는 게
+> 아니라, 그것이 놓치는 인던 입장 직전 상황만 메꿉니다.
+> Leave the game's own relic auto charge on; this only fills the gap it leaves.
+
+---
+
+# Convenient HUD
+
+자주 바꾸는 그래픽/전투 옵션을 설정창에 들어가지 않고 화면에서 바로 전환하는 애드온입니다.
+Flip frequently-changed graphics and combat options in place, without opening the option window.
+
+## 주요 기능 / Features
+
+- **다른 캐릭터 이펙트 보기 / Show other PC effects** — 즉시 반영되지 않으면 재접속 후 적용됩니다
+  (applies after re-entering if it does not change at once)
+- **캐스팅/채널링 자동 시전 / Auto cast while casting**
+- **큐폴 자동물약 사용 / Cupole auto potion** — 도시에서는 전환할 수 없습니다 (게임 제한)
+  (cannot be toggled in a city — a game restriction)
+- **이펙트 선명도 3종 / Three effect clarity sliders** — 내 이펙트 / 다른 캐릭터 이펙트 / 보스 몬스터 이펙트를
+  각각 10 · 25 · 50 · 75 · 100% 버튼으로 지정합니다 (my / other PC / boss effects, five preset steps each)
+
+## 사용법 / Usage
+
+1. HUD 바의 on/off 아이콘을 누르면 옵션 패널이 펼쳐지고 접힙니다
+   Click the on/off icon on the bar to open and close the panel
+2. 토글은 눌러서 바로 전환, 선명도는 원하는 % 버튼을 누릅니다
+   Toggles flip on click; for clarity, press the percentage you want
+3. 바를 드래그하면 위치가 저장됩니다 (Drag the bar to move it; the position is saved)
+
+## Notes
+
+- **값을 저장하지 않습니다.** 창을 열 때마다 클라이언트의 현재 값을 읽어 보여줍니다.
+  mini_addons 등 다른 애드온도 같은 옵션을 로그인마다 밀어넣기 때문에, 사본을 들고 있다가 다시
+  적용하면 서로 덮어쓰는 싸움이 됩니다.
+  Nothing is cached — the current client value is read every time. Other addons push the same
+  options at login, so keeping a private copy would just be a fight over who writes last.
+- 선명도는 % 가 아니라 0~255 알파값이며, 게임 설정창 표시값과 맞도록 raw 값을 골랐습니다.
+  Clarity is a 0–255 alpha, not a percent; the raw values are picked to match the option window.
+
+## 저장 경로 / Save Path
+
+- `../addons/convenient_hud/<AID>/convenient_hud.json` (HUD 위치/열림 상태만 / HUD position and open state only)
 
 ---
 

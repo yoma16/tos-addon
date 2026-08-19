@@ -44,12 +44,12 @@
     "tags": ["yomae", "auto_ads", "yoma16", "요매"]
   },
   {
-    "tosversion" : "20260817",
+    "tosversion" : "20260820",
     "name": "Auto Keeper",
     "file": "auto_keeper",
     "extension": "ipf",
-    "fileVersion": "v1.0.0",
-    "releaseTag": "auto_keeper_v1.0.0",
+    "fileVersion": "v1.1.0",
+    "releaseTag": "auto_keeper_v1.1.0",
     "unicode": "⛄",
     "description": "자동 관리 HUD. 스태미나 알약 자동 섭취, 물약 회복 버프 자동 해제, 성물 마력 보완 충전, 장비 자동 수리 네 가지를 HUD 아이콘으로 각각 켜고 끕니다. 아이콘을 누르면 켜짐/꺼짐이 색으로 바뀌고, 수리 아이콘을 우클릭하면 설정창이 열립니다. HUD는 드래그로 옮기면 위치가 저장되고 /keeper 로 표시를 켜고 끕니다.<br> v1.0.0: 스태미나는 최대치의 20% 이하에서 알약을 하나씩 먹고 도시와 이벤트 맵에서는 동작하지 않습니다. 물약 회복 버프는 체력이 40% 이상이 되면 해제합니다. 성물은 던전 입장창에서 마력이 덜 찼을 때 엑토나이트로 채웁니다. 장비는 내구도가 30% 미만이면 긴급 수리 키트로 수리하고, 부족하면 필요한 수량만큼만 자동으로 구매합니다(설정창에서 켜야 동작).<br> ⚠️ autostamina, no_potion 애드온과 Nexus Addons의 Auto Repair, mini_addons의 성물 자동충전은 반드시 꺼 주세요. 같은 동작이 두 번 돌아 아이템을 이중으로 소모합니다.<br> Auto Keeper. Four chores on one HUD bar, each toggled by its own icon: stamina pills, removing the potion heal buff, topping up relic power, and repairing gear. Click an icon to switch it on or off, right click the repair icon for its settings, drag the bar to move it, and use /keeper to show or hide it.<br> v1.0.0: stamina eats one pill at a time below 20% and does nothing in cities or event maps. The potion heal buff is removed once HP is back at 40% or above. Relic power is filled with Ectonite at the dungeon entry window. Gear below 30% durability is repaired with emergency repair kits, buying only as many as the repair needs when you run short (auto-buy must be switched on in the settings).<br> ⚠️ Turn off the autostamina and no_potion addons, Auto Repair in Nexus Addons, and the relic auto charge in mini_addons — two copies of the same job burn twice the items.<br> 自動管理HUD。スタミナ丸薬の自動使用、回復ポーションバフの自動解除、レリック魔力の補完チャージ、装備の自動修理の4つをHUDアイコンで個別にオン/オフします。アイコンをクリックすると色で状態が変わり、修理アイコンを右クリックすると設定ウィンドウが開きます。HUDはドラッグで移動でき位置が保存され、/keeper で表示を切り替えます。<br> v1.0.0: スタミナは最大値の20%以下で丸薬を1個ずつ使い、街とイベントマップでは動作しません。回復ポーションバフはHPが40%以上になると解除します。レリックはダンジョン入場画面で魔力が満タンでなければエクトナイトで補充します。装備は耐久度が30%未満なら緊急修理キットで修理し、足りなければ必要な数だけ自動購入します(設定でオンにした場合のみ)。<br> ⚠️ autostamina・no_potionアドオン、Nexus AddonsのAuto Repair、mini_addonsのレリック自動チャージは必ずオフにしてください。同じ動作が二重に走りアイテムを余計に消費します。",
     "tags": ["yomae", "auto_keeper", "stamina", "repair", "relic", "yoma16", "요매", "자동"]
