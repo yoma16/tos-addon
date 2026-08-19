@@ -142,6 +142,8 @@ Five upkeep chores on one HUD bar, each toggled by its own icon.
 - HUD는 드래그로 옮기면 위치가 저장되고, `/keeper` 로 표시를 켜고 끕니다
   Drag the bar to move it; `/keeper` shows or hides it
 
+![Auto Keeper HUD 바](image-4.png)
+
 ## 바카리네 설정창 / Vakarine settings
 
 - **맵 진입 시 자동 실행** — 캐릭터별로 저장됩니다 (Auto run on map entry, saved per character)
@@ -156,6 +158,8 @@ Five upkeep chores on one HUD bar, each toggled by its own icon.
 |---|---|
 | 완벽 / Perfect | 완벽함 수치가 있을 때 체력 100% (perfection value present, HP at 100%) |
 | 복수 / Revenge | 5세트면 체력 45% 이하, 5세트 미만이면 복수 수치가 있을 때 35% 이하 (45% with the 5-piece set, 35% with a revenge value and fewer pieces) |
+
+![바카리네 장비 탈착 설정창](image-5.png)
 
 ## 진단 명령 / Diagnostics
 
@@ -205,6 +209,8 @@ Flip frequently-changed graphics and combat options in place, without opening th
 2. 토글은 눌러서 바로 전환, 선명도는 원하는 % 버튼을 누릅니다
    Toggles flip on click; for clarity, press the percentage you want
 3. 바를 드래그하면 위치가 저장됩니다 (Drag the bar to move it; the position is saved)
+
+![Convenient HUD 옵션 패널](image-6.png)
 
 ## Notes
 
