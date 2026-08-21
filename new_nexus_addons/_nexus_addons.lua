@@ -45,12 +45,13 @@
 -- 1.0.7 "IP: scale the whole panel down to 80% (IP_SCALE) including font sizes (ip_f) and fix the frame position resetting to the default after every redraw (drag save was wired to the inverted move flag)"
 -- 1.0.8 "VE v1.1.0: the weekly-boss checkbox no longer skips the map check entirely (gear used to swap on every non-city map), all on/off toggle, translucent config window. QSO: the joystick quickslot bar no longer disappears after a potion swap -- it is never hidden anymore, and the keyboard bar is shown at alpha 0 so it does not flash"
 -- 1.0.9 "Startup load time cut from 9.2s to 2.2s: market_voucher no longer keeps a duplicate json of its trade log (1,360 entries / 124KB were decoded and re-encoded on every login, 5.2s, even with the addon turned off) - the log txt is now the source of truth and is read only when the voucher window opens. The init throttle also went from 2 addons per 0.1s tick to 6 per 0.05s tick, which cut ~2.2s of pure waiting. AWH: favorite items - new star button left of TAKE SET opens a favorites picker (no count needed), favorites are pinned to the top of the list and get their own tab above All (tab column rescaled to fit 11 tabs). Non-stackable gear is tracked by item guid, so two copies of the same gear with different options register separately. Registering a favorite no longer scrolls the warehouse list back to the top, and all favorite strings now have Korean text"
+-- 1.1.0 "Challenge Helper: new addon showing a challenge-mode HUD (stage, kill count, remaining time) plus the horizontal distance to the nearest live boss and to the exit portal, with a minimap marker on the boss. Portal coordinates come from the game's own minimap-mark calls, which are hooked so the original marker still draws. OCSL: the representative-class icon on the left of each character now actually follows the class picked in ILV - the lookup read this bundle's own data under author \"norisan\" while this fork is authored as \"yomae\", so it never resolved; the id is also converted back to a number (it is stored as a string) and a missing class falls back to a placeholder icon instead of a nil image"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.0.9"
+local ver = "1.1.0"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -481,6 +482,15 @@ g._nexus_addons = {{
         old_init_func = "CC_HELPER_ON_INIT" -- CC_HELPER_ON_INIT
     }
 }, {
+    key = "challenge_helper",
+    data = {
+        use = 0,
+        name = "Challenge Helper",
+        frame_use = true,
+        config_func = "Challenge_helper_settings_frame_init",
+        old_init_func = ""
+    }
+}, {
     key = "characters_item_serch",
     data = {
         use = 0,
@@ -823,6 +833,11 @@ g._nexus_addons_trans = {
         ja = "{ol}ボスが向いている方向を矢印でお知らせ",
         etc = "{ol}Arrow indicates the direction the boss is facing",
         kr = "{ol}보스가 향하는 방향을 화살표로 표시"
+    },
+    ["challenge_helper"] = {
+        ja = "{ol}チャレンジモードの段階・討伐数・残り時間をHUDに表示{nl}ボスと脱出ポータルの距離表示とミニマップマーカー付き",
+        etc = "{ol}HUD showing challenge mode stage, kill count and remaining time{nl}Includes distance to the boss / exit portal and a minimap marker",
+        kr = "{ol}챌린지 모드의 단계·처치수·남은 시간을 HUD로 표시{nl}보스와 탈출 포탈까지의 거리 표시 및 미니맵 마커 포함"
     },
     ["dungeon_rp_charger"] = {
         ja = "{ol}meldavyさん作成{nl}聖域で自動でレリックポイントを補充します",
@@ -1354,7 +1369,8 @@ function _nexus_addons_list_close(frame)
                             "easy_buff", "always_status_settings", "lets_go_home_setting", "characters_item_serch",
                             "sub_map_setting_frame", "separate_buff_custom_buff_list", "save_quest_setting",
                             "sub_slotset_setting", "Battle_ritual_setting", "Battle_ritual_skill_list",
-                            "Battle_ritual_buff_list", "get_event_msg_setting", "archeology_helper_setting"}
+                            "Battle_ritual_buff_list", "get_event_msg_setting", "archeology_helper_setting",
+                            "challenge_helper_settings"}
     for _, suffix in ipairs(frame_to_close) do
         local frame_name = addon_name_lower .. suffix
         local frame_to_close = ui.GetFrame(frame_name)
@@ -14622,24 +14638,37 @@ function Other_character_skill_list_render_frame()
         local char_settings = g.ocsl_settings.chars[char_info.name]
         if char_settings.hide ~= 1 or g.ocsl_settings.hide == 0 then
             local job_list, level, last_job_id = GetJobListFromAdventureBookCharData(char_info.name)
-            if type(_G["INDUN_LIST_VIEWER_ON_INIT"]) == "function" then
-                local ilv = _G["ADDONS"]["norisan"]["indun_list_viewer"]
-                local ilv_settings = ilv and ilv.settings
-                if ilv_settings and ilv_settings[char_info.name] then
-                    if ilv_settings[char_info.name].president_jobid ~= "" then
-                        last_job_id = ilv_settings[char_info.name].president_jobid
-                    end
-                end
-            elseif type(_G["indun_list_viewer_on_init"]) == "function" then
-                local ilv_settings = _G["ADDONS"]["norisan"]["_NEXUS_ADDONS"].ilv_settings
-                if ilv_settings and ilv_settings.chars and ilv_settings.chars[char_info.name] then
-                    if ilv_settings.chars[char_info.name].president_jobid ~= "" then
-                        last_job_id = ilv_settings.chars[char_info.name].president_jobid
-                    end
-                end
+            -- 대표 클래스(ILV 의 president_jobid)를 우선 쓰고, 없으면 어드벤처북의 마지막 직업
+            -- ⚠️ 예전 코드는 이 번들의 데이터를 `_G["ADDONS"]["norisan"]["_NEXUS_ADDONS"]` 에서
+            -- 찾았다. 이 포크의 author 는 "yomae" 라 그 경로는 존재하지 않는다 — 같은 파일의 `g` 가
+            -- 맞다. 그래서 대표 클래스가 한 번도 반영되지 않았다. 단독 ILV 애드온 경로는 남겨 둔다
+            -- ⚠️ the old code looked this bundle's own data up under author "norisan"; this fork is
+            -- authored as "yomae", so that path never existed and the representative class was
+            -- never applied. use `g` for our own data and keep the standalone-ILV path as well
+            local president_jobid = ""
+            local norisan_root = _G["ADDONS"] and _G["ADDONS"]["norisan"]
+            local ilv_standalone = norisan_root and norisan_root["indun_list_viewer"]
+            local ilv_std_settings = ilv_standalone and ilv_standalone.settings
+            if ilv_std_settings and ilv_std_settings[char_info.name] then
+                president_jobid = ilv_std_settings[char_info.name].president_jobid or ""
             end
-            local last_job_class = GetClassByType("Job", last_job_id)
-            local last_job_icon = TryGetProp(last_job_class, "Icon")
+            if president_jobid == "" and g.ilv_settings and g.ilv_settings.chars and
+                g.ilv_settings.chars[char_info.name] then
+                president_jobid = g.ilv_settings.chars[char_info.name].president_jobid or ""
+            end
+            if president_jobid ~= "" then
+                last_job_id = president_jobid
+            end
+            -- ⚠️ president_jobid 는 `tostring(select_key)` 로 저장되므로 숫자로 되돌려야 한다.
+            -- ILV 자신의 렌더러(Indun_list_viewer_job_slot)도 `tonumber(...) or 0` 를 쓰고,
+            -- 클래스를 못 찾으면 자리표시 아이콘으로 떨어진다. 여기도 같게 맞춘다
+            -- ⚠️ president_jobid is stored via tostring, so it has to be converted back; ILV's own
+            -- renderer does the same and falls back to a placeholder icon when the class is missing
+            local last_job_class = GetClassByType("Job", tonumber(last_job_id) or 0)
+            local last_job_icon = "icon_item_nothing"
+            if last_job_class then
+                last_job_icon = TryGetProp(last_job_class, "Icon", "icon_item_nothing")
+            end
             local job_slot = main_gbox:CreateOrGetControl("slot", "jobslot" .. i, 0, y_pos - 3, 25, 25)
             AUTO_CAST(job_slot)
             job_slot:SetSkinName("None")
@@ -29326,6 +29355,711 @@ function Boss_direction_handle_check(_nexus_addons, Boss_direction_timer)
     end
 end
 -- Boss Direction ここまで
+
+-- Challenge Helper start
+-- 챌린지 모드의 진행 상황(단계/처치수/남은시간)과 보스·탈출 포탈까지의 거리를 HUD로 표시한다
+-- shows challenge mode progress plus the distance to the boss and the exit portal
+g.challenge_helper = {
+    boss_mark_key = "NexusChallengeHelperBoss",
+    -- 500이면 보스가 코앞에 와야 잡힌다. sub_map 이 5000으로 쓰는 선례가 있어 맞춘다
+    -- 500 only catches a boss already on top of you; sub_map uses 5000, so match that
+    scan_range = 5000,
+    -- 실측: 챌린지 입장 지점에서 포탈까지 2,481 유닛. 반경 1000으로는 포탈 근처를 보지도 못했다.
+    -- 맵 규모의 장애물 유무를 보려면 넓게 훑어야 하므로 반경을 키우고 간격을 늘린다(61x61=3,721샘플)
+    -- measured: the portal sits 2,481 units from the entrance, so a 1000 radius never even reached it;
+    -- widen the window and coarsen the step to see map-scale obstacles (61x61 = 3,721 samples)
+    probe_half = 3000, -- 진단 샘플 반경(월드 유닛) / diagnostic sample radius in world units
+    probe_step = 100 -- 진단 격자 간격 / diagnostic grid spacing
+}
+
+function Challenge_helper_save_settings()
+    g.save_json(g.challenge_helper_path, g.challenge_helper_settings)
+end
+
+function Challenge_helper_load_settings()
+    g.challenge_helper_path = string.format("../addons/%s/%s/challenge_helper.json", addon_name_lower, g.active_id)
+    local changed = false
+    local settings = g.load_json(g.challenge_helper_path)
+    if not settings then
+        settings = {
+            frame_x = 120,
+            frame_y = 320,
+            notify = 1,
+            minimap_mark = 1,
+            probe = 0,
+            navi_debug = 0
+        }
+        changed = true
+    end
+    -- 구 설정 파일에 없던 키 보충 / fill in keys missing from an older settings file
+    if settings.probe == nil then
+        settings.probe = 0
+        changed = true
+    end
+    if settings.navi_debug == nil then
+        settings.navi_debug = 0
+        changed = true
+    end
+    g.challenge_helper_settings = settings
+    if changed then
+        Challenge_helper_save_settings()
+    end
+end
+
+function Challenge_helper_reset_state()
+    g.ch_state = {
+        stage = 0,
+        kill = 0,
+        target = 0,
+        start_ms = nil,
+        limit_sec = 0,
+        portal = nil,
+        portal_notified = false,
+        boss_notified = false,
+        boss_marked = false,
+        active = false
+    }
+end
+
+-- 챌린지 모드 맵 판정. 자동매칭/1인 양쪽 모두 대응 / auto-match and solo challenge maps
+function Challenge_helper_is_challenge_map()
+    local ok, is_auto = pcall(session.IsAutoChallengeMap)
+    if ok and is_auto == true then
+        return true
+    end
+    local ok_solo, is_solo = pcall(session.IsSoloChallengeMap)
+    if ok_solo and is_solo == true then
+        return true
+    end
+    return false
+end
+
+function challenge_helper_on_init()
+    if not g.challenge_helper_settings then
+        Challenge_helper_load_settings()
+    end
+    local old_func = g.settings.challenge_helper.old_init_func
+    if _G[old_func] then
+        return
+    end
+    Challenge_helper_reset_state()
+    g.addon:RegisterMsg("UI_CHALLENGE_MODE_TOTAL_KILL_COUNT", "Challenge_helper_KILL_COUNT")
+    g.setup_hook(Challenge_helper_SHOW_MINIMAP_MARK, "CHALLENGE_MODE_SHOW_MINIMAP_MARK")
+    g.setup_hook(Challenge_helper_UPDATE_MINIMAP_MARK, "UPDATE_CHALLENGE_MODE_MINIMAP_MARK")
+    -- 맵 판정 두 함수가 실제로 무엇을 반환하는지 기록해 둔다 / record what the two map checks actually return
+    if g.settings.challenge_helper.use == 1 then
+        local ok_auto, is_auto = pcall(session.IsAutoChallengeMap)
+        local ok_solo, is_solo = pcall(session.IsSoloChallengeMap)
+        g.log_to_file(string.format("[ch] init map=%s auto=%s(ok=%s) solo=%s(ok=%s)", tostring(g.map_name),
+            tostring(is_auto), tostring(ok_auto), tostring(is_solo), tostring(ok_solo)))
+    end
+    if Challenge_helper_is_challenge_map() then
+        g.ch_state.active = true
+        Challenge_helper_frame_init()
+        -- probe=1 로 켜두면 챌린지 맵에 들어올 때 자동으로 1회 실행한다.
+        -- 엔터를 누른 순간에만 돌아서 정작 챌린지 안의 지형을 한 번도 못 떴다
+        -- with probe=1 left on, run once automatically on entering a challenge map: firing only on
+        -- the Enter keypress meant the terrain inside a challenge was never actually sampled
+        if g.challenge_helper_settings.probe == 1 then
+            local ok, err = pcall(Challenge_helper_probe_run)
+            if not ok then
+                g.log_to_file("[ch probe] ERROR: " .. tostring(err))
+            end
+        end
+    end
+end
+
+function Challenge_helper_notify(text)
+    if g.settings.challenge_helper.use == 0 then
+        return
+    end
+    if g.challenge_helper_settings.notify == 0 then
+        return
+    end
+    ui.SysMsg(text)
+end
+
+-- 포탈 좌표는 게임이 미니맵 마커를 그릴 때 그대로 Lua로 넘겨준다
+-- the game hands the portal coordinates to Lua when it draws the minimap mark
+function Challenge_helper_set_portal(x, y, z, alive)
+    if not g.ch_state then
+        Challenge_helper_reset_state()
+    end
+    local st = g.ch_state
+    if not alive then
+        st.portal = nil
+        st.portal_notified = false
+        return
+    end
+    st.portal = {
+        x = x,
+        y = y,
+        z = z
+    }
+    if not st.portal_notified then
+        st.portal_notified = true
+        Challenge_helper_notify(g.lang == "Japanese" and "{ol}[Challenge Helper] 脱出ポータルが出現しました" or g.lang ==
+                                    "kr" and "{ol}[Challenge Helper] 탈출 포탈이 생성되었습니다" or
+                                    "{ol}[Challenge Helper] The exit portal has appeared")
+    end
+end
+
+function Challenge_helper_SHOW_MINIMAP_MARK(x, y, z, isCreate)
+    local origin = g.FUNCS["CHALLENGE_MODE_SHOW_MINIMAP_MARK"]
+    if origin then
+        pcall(origin, x, y, z, isCreate)
+    end
+    if g.settings.challenge_helper.use == 1 then
+        g.log_to_file(string.format("[ch] portal SHOW x=%s y=%s z=%s create=%s", tostring(x), tostring(y),
+            tostring(z), tostring(isCreate)))
+    end
+    pcall(Challenge_helper_set_portal, x, y, z, isCreate == 1)
+end
+
+function Challenge_helper_UPDATE_MINIMAP_MARK(x, y, z, isAlive, isHardMode)
+    local origin = g.FUNCS["UPDATE_CHALLENGE_MODE_MINIMAP_MARK"]
+    if origin then
+        pcall(origin, x, y, z, isAlive, isHardMode)
+    end
+    if g.settings.challenge_helper.use == 1 then
+        g.log_to_file(string.format("[ch] portal UPDATE x=%s y=%s z=%s alive=%s hard=%s", tostring(x), tostring(y),
+            tostring(z), tostring(isAlive), tostring(isHardMode)))
+    end
+    pcall(Challenge_helper_set_portal, x, y, z, isAlive == 1)
+end
+
+-- 게임이 브로드캐스트하는 챌린지 진행 메시지를 그대로 읽는다 (challenge_mode.lua 의 포맷)
+-- reads the challenge progress message broadcast by the game (format from challenge_mode.lua)
+function Challenge_helper_KILL_COUNT(frame, msg, str, arg)
+    if g.settings.challenge_helper.use == 0 then
+        return
+    end
+    if not g.ch_state then
+        Challenge_helper_reset_state()
+    end
+    local list = StringSplit(str, '#')
+    if not list or #list < 1 then
+        return
+    end
+    g.log_to_file("[ch] msg " .. tostring(str))
+    local st = g.ch_state
+    local head = list[1]
+    -- 이 메시지가 왔다는 것 자체가 챌린지 진행 중이라는 확실한 신호다. 맵 판정을 다시 묻지 않는다
+    -- the message itself proves a challenge is running; never re-ask the map check here
+    if head == "SHOW" or head == "GAUGERESET" then
+        st.active = true
+        st.stage = tonumber(list[2]) or st.stage
+        st.kill = 0
+        st.target = 0
+        st.boss_notified = false
+        Challenge_helper_frame_init(true)
+    elseif head == "START_CHALLENGE_TIMER" then
+        st.active = true
+        st.start_ms = imcTime.GetAppTimeMS()
+        st.limit_sec = (tonumber(list[2]) or 0) / 1000
+        Challenge_helper_frame_init(true)
+    elseif head == "REFRESH" then
+        st.active = true
+        -- 같은 초에 서로 다른 카운터가 두 번 온다(개인/전체로 추정). 작은 쪽을 그대로 쓰면
+        -- 숫자가 계속 깜빡이므로 단계 내 최대값만 채택한다 (단계 전환 시 SHOW/GAUGERESET 에서 0으로 리셋)
+        -- two different counters arrive in the same second; keeping the smaller one makes the number
+        -- flicker, so track the per-stage maximum (reset to 0 by SHOW/GAUGERESET on stage change)
+        local kill = tonumber(list[2]) or 0
+        local target = tonumber(list[3]) or 0
+        if kill > st.kill then
+            st.kill = kill
+        end
+        if target > 0 then
+            st.target = target
+        end
+        Challenge_helper_frame_init(true)
+    elseif head == "HIDE" then
+        -- HIDE 는 "게임 자체 게이지 UI 를 숨겨라"이지 "정보가 더는 필요 없다"가 아니다.
+        -- 마지막 보스가 죽고 탈출 포탈이 생기는 바로 그 순간에 오므로, 여기서 HUD 를 지우면
+        -- 포탈까지의 거리가 가장 필요한 시점에 사라진다. 정리는 update 의 조건에 맡긴다
+        -- HIDE means "hide the game's own gauge", not "the player is done": it arrives exactly when the
+        -- last boss dies and the exit portal spawns, so tearing down here kills the portal distance
+        -- right when it matters most. Leave teardown to the update loop's condition
+        st.active = false
+    end
+end
+
+function Challenge_helper_remain_sec()
+    local st = g.ch_state
+    if not st or not st.start_ms or st.limit_sec <= 0 then
+        return nil
+    end
+    local remain = st.limit_sec - (imcTime.GetAppTimeMS() - st.start_ms) / 1000
+    if remain < 0 then
+        remain = 0
+    end
+    return remain
+end
+
+function Challenge_helper_my_pos()
+    local handle = session.GetMyHandle()
+    if not handle then
+        return nil
+    end
+    local actor = world.GetActor(handle)
+    if not actor then
+        return nil
+    end
+    return actor:GetPos()
+end
+
+-- 수평 거리만 쓴다. 높이차는 챌린지 맵에서 의미가 없다 / horizontal distance only
+function Challenge_helper_dist(a, b)
+    local dx = a.x - b.x
+    local dz = a.z - b.z
+    return math.floor(math.sqrt(dx * dx + dz * dz))
+end
+
+function Challenge_helper_nearest_boss(my_pos)
+    if not my_pos then
+        return nil
+    end
+    local pc = GetMyPCObject()
+    if not pc then
+        return nil
+    end
+    local ok, objects, count = pcall(SelectObject, pc, g.challenge_helper.scan_range, "ENEMY")
+    if not ok or not objects or not count then
+        return nil
+    end
+    local best = nil
+    for i = 1, count do
+        local handle = GetHandle(objects[i])
+        local target_info = info.GetTargetInfo(handle)
+        if target_info and target_info.isBoss == 1 then
+            local stat = target_info.stat
+            if not stat or stat.HP > 0 then
+                local actor = world.GetActor(handle)
+                if actor then
+                    local pos = actor:GetPos()
+                    local dist = Challenge_helper_dist(my_pos, pos)
+                    if not best or dist < best.dist then
+                        best = {
+                            handle = handle,
+                            pos = pos,
+                            dist = dist
+                        }
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- world.IsValidPos 가 실제로 무엇을 판정하는지 인게임에서 확인하기 위한 일회성 진단.
+-- 통행 가능 판정이면 벽/물/절벽 윤곽이 '#'로 찍히고, 단순 맵 경계 체크면 테두리만 찍힌다.
+-- one-shot diagnostic to find out what world.IsValidPos actually reports: a navmesh query
+-- outlines walls/water as '#', a plain bounds check only marks the map border.
+-- 개발자용이라 출력은 영어로 두고 debug_log.txt 에 기록한다 / dev-facing, logged in English
+function Challenge_helper_probe_run()
+    local my_pos = Challenge_helper_my_pos()
+    if not my_pos then
+        ui.SysMsg("{ol}[Challenge Helper] probe: my position unavailable")
+        return
+    end
+    local half = g.challenge_helper.probe_half
+    local step = g.challenge_helper.probe_step
+    local rows = {}
+    local total, blocked, failed = 0, 0, 0
+    local own = "unknown"
+    local z = -half
+    while z <= half do
+        local line = {}
+        local x = -half
+        while x <= half do
+            -- 실측(2026-08-13): 내가 서 있는 칸 = 반드시 통행 가능한 칸이 result~=1 로 나왔다.
+            -- 즉 result==1 이 '막힘'이다. 도시에서 통행 가능 91%로 수치도 맞아떨어진다
+            -- measured: the cell I stand on (walkable by definition) returned result~=1,
+            -- so result==1 means BLOCKED. 91% walkable in town matches reality
+            local mark
+            local ok, result = pcall(world.IsValidPos, my_pos.x + x, my_pos.z + z)
+            if not ok then
+                failed = failed + 1
+                mark = "?"
+            elseif result == 1 or result == true then
+                blocked = blocked + 1
+                mark = "#"
+            else
+                mark = "."
+            end
+            -- 내가 선 자리는 정의상 통행 가능하므로 극성 판별의 기준점이다.
+            -- 값을 덮어쓰지 말고 O(통행가능) / X(막힘) 로 위치와 값을 함께 남긴다
+            -- where I stand is walkable by definition, so it anchors the polarity:
+            -- keep the value instead of masking it, as O(walkable) / X(blocked)
+            -- 극성이 맞다면 여기는 반드시 walkable 이어야 한다. blocked 가 나오면 해석이 또 틀린 것
+            -- if the polarity is right this must read walkable; "blocked" here means we got it wrong again
+            if x == 0 and z == 0 then
+                if mark == "." then
+                    own = "walkable"
+                    mark = "O"
+                elseif mark == "#" then
+                    own = "BLOCKED(polarity wrong!)"
+                    mark = "X"
+                else
+                    own = "call failed"
+                end
+            end
+            line[#line + 1] = mark
+            total = total + 1
+            x = x + step
+        end
+        rows[#rows + 1] = table.concat(line)
+        z = z + step
+    end
+    g.log_to_file(string.format("[ch probe] map=%s pos=%.1f,%.1f,%.1f half=%d step=%d grid=%d rows",
+        tostring(g.map_name), my_pos.x, my_pos.y, my_pos.z, half, step, #rows))
+    g.log_to_file(string.format("[ch probe] total=%d walkable=%d blocked=%d call_failed=%d OWN_CELL=%s", total,
+        total - blocked - failed, blocked, failed, own))
+    g.log_to_file("[ch probe] legend: z ascending top->bottom, x ascending left->right, .=walkable #=blocked ?=call failed, O=me+walkable X=me+blocked")
+    for i = 1, #rows do
+        g.log_to_file("[ch probe] " .. rows[i])
+    end
+    -- 결과 문구가 오류로 읽히지 않게 한다(이전엔 "invalid 1497/1681"만 떠서 에러로 오해했다)
+    -- keep the wording from reading like a crash (the old "invalid 1497/1681" was mistaken for an error)
+    local is_kr = g.lang == "kr"
+    local verdict
+    if failed > 0 then
+        verdict = is_kr and string.format("호출 실패 %d/%d — 인자 규약이 다름", failed, total) or
+                      string.format("call failed %d/%d - wrong signature", failed, total)
+    elseif blocked == 0 then
+        verdict = is_kr and string.format("막힌 칸 없음 (%d개 전부 통행 가능) — 벽 옆에서 다시 해주세요", total) or
+                      string.format("nothing blocked in %d cells - retry next to a wall", total)
+    else
+        verdict = is_kr and string.format("완료 — 통행가능 %d / 막힘 %d, 내 위치=%s", total - blocked - failed, blocked, own) or
+                      string.format("done - walkable %d, blocked %d, my cell=%s", total - blocked - failed, blocked, own)
+    end
+    ui.SysMsg("{ol}[Challenge Helper] " ..
+                  (is_kr and "지형 진단 " or "terrain probe ") .. verdict)
+end
+
+-- force=true 면 맵 판정을 건너뛴다(게임 메시지로 이미 챌린지 진행이 확인된 경우)
+-- force=true skips the map check: the game message already proved a challenge is running
+-- exe 바인딩 테이블에 debug 모듈의 내비메시 시각화 함수가 있다(ToggleCell / ShowTestAgent 등).
+-- 좌표를 반환하지 않아 경로 계산엔 못 쓰지만, 통행 가능 지형을 눈으로 볼 수 있는지 시험한다.
+-- GET_UI_CHEAT 같은 개발 플래그로 막혀 있을 수 있어 존재 확인 후 pcall 로만 호출한다.
+-- MakeNaviMiniMap(파일 생성 가능)과 PrintAllObj(콘솔 스팸)는 존재만 기록하고 호출하지 않는다
+-- the exe binds navmesh visualisation helpers on the debug module; they return no coordinates so they
+-- cannot drive pathfinding, but they may draw walkable terrain. Existence-check then pcall only;
+-- MakeNaviMiniMap (may write files) and PrintAllObj (console spam) are reported but never called
+function Challenge_helper_navi_debug_run()
+    if type(debug) ~= "table" then
+        g.log_to_file("[ch navi] debug module is " .. type(debug))
+        ui.SysMsg("{ol}[Challenge Helper] navi: debug 모듈 없음")
+        return
+    end
+    local names = {"ToggleCell", "ShowTestAgent", "ToggleRenderOBB", "ToggleUIDebug", "MakeNaviMiniMap", "PrintAllObj"}
+    local found = {}
+    for i = 1, #names do
+        found[#found + 1] = names[i] .. "=" .. type(debug[names[i]])
+    end
+    g.log_to_file("[ch navi] bindings: " .. table.concat(found, " "))
+    local result = {}
+    local toggles = {"ToggleCell", "ShowTestAgent"}
+    for i = 1, #toggles do
+        local name = toggles[i]
+        local fn = debug[name]
+        if type(fn) == "function" then
+            local ok, err = pcall(fn)
+            g.log_to_file(string.format("[ch navi] call %s -> ok=%s err=%s", name, tostring(ok), tostring(err)))
+            result[#result + 1] = name .. (ok and ":ok" or ":error")
+        else
+            result[#result + 1] = name .. ":absent"
+        end
+    end
+    ui.SysMsg("{ol}[Challenge Helper] navi: " .. table.concat(result, ", "))
+end
+
+function Challenge_helper_frame_init(force)
+    if g.settings.challenge_helper.use == 0 then
+        return
+    end
+    if not force and not Challenge_helper_is_challenge_map() then
+        return
+    end
+    -- 진행 메시지가 매초 오므로 여기도 매초 불린다. 이미 있는 프레임을 다시 배치하면
+    -- SetPos 가 드래그한 위치를 1초마다 되돌린다 -> 존재하면 타이머만 확인하고 빠진다
+    -- the progress messages arrive every second, so this runs every second too; re-placing an existing
+    -- frame would snap the dragged position back once a second, so only make sure the timer is alive
+    if ui.GetFrame(addon_name_lower .. "challenge_helper") then
+        Challenge_helper_timer_start()
+        return
+    end
+    local challenge_helper = ui.CreateNewFrame("chat_memberlist", addon_name_lower .. "challenge_helper", 0, 0, 0, 0)
+    AUTO_CAST(challenge_helper)
+    challenge_helper:SetSkinName("shadow_box")
+    challenge_helper:SetTitleBarSkin("None")
+    challenge_helper:EnableHitTest(1)
+    challenge_helper:EnableMove(1)
+    challenge_helper:SetAlpha(80)
+    challenge_helper:SetLayerLevel(31)
+    challenge_helper:SetEventScript(ui.LBUTTONUP, "Challenge_helper_pos")
+    challenge_helper:SetPos(g.challenge_helper_settings.frame_x, g.challenge_helper_settings.frame_y)
+    local progress_text = challenge_helper:CreateOrGetControl("richtext", "progress_text", 10, 8, 220, 26)
+    AUTO_CAST(progress_text)
+    progress_text:SetText("{ol}{s16}Challenge{/}")
+    local boss_text = challenge_helper:CreateOrGetControl("richtext", "boss_text", 10, 32, 220, 26)
+    AUTO_CAST(boss_text)
+    local portal_text = challenge_helper:CreateOrGetControl("richtext", "portal_text", 10, 56, 220, 26)
+    AUTO_CAST(portal_text)
+    challenge_helper:Resize(230, 88)
+    challenge_helper:ShowWindow(1)
+    Challenge_helper_timer_start()
+end
+
+function Challenge_helper_timer_start()
+    local _nexus_addons = ui.GetFrame("_nexus_addons")
+    if not _nexus_addons then
+        return
+    end
+    local challenge_helper_timer = _nexus_addons:CreateOrGetControl("timer", "challenge_helper_timer", 0, 0)
+    AUTO_CAST(challenge_helper_timer)
+    challenge_helper_timer:SetUpdateScript("Challenge_helper_update")
+    challenge_helper_timer:Start(0.5)
+end
+
+function Challenge_helper_update(_nexus_addons, challenge_helper_timer)
+    local challenge_helper = ui.GetFrame(addon_name_lower .. "challenge_helper")
+    if not challenge_helper then
+        if challenge_helper_timer then
+            challenge_helper_timer:Stop()
+        end
+        return
+    end
+    if not g.ch_state then
+        Challenge_helper_reset_state()
+    end
+    local st = g.ch_state
+    -- 정리 조건은 "꺼짐" 또는 "챌린지가 끝났고(HIDE) 챌린지 맵도 아님"뿐.
+    -- 맵 판정만으로 지우면 판정이 틀렸을 때 방금 만든 HUD를 즉시 파괴한다
+    -- only tear down when switched off, or when the challenge ended AND we are off a challenge map;
+    -- keying teardown on the map check alone destroys the HUD one tick after creating it
+    -- 포탈이 살아 있으면 챌린지가 끝났어도 유지한다(포탈까지 걸어가는 동안이 정보가 필요한 구간)
+    -- keep it alive while a portal exists: walking to the portal is exactly when the info is needed
+    if g.settings.challenge_helper.use == 0 or
+        (not st.active and not st.portal and not Challenge_helper_is_challenge_map()) then
+        Challenge_helper_clear()
+        if challenge_helper_timer then
+            challenge_helper_timer:Stop()
+        end
+        return
+    end
+    local progress = g.lang == "Japanese" and "段階" or g.lang == "kr" and "단계" or "Stage"
+    -- 원시 카운터가 목표를 넘겨 오기도 한다(163/150). 목표에서 잘라 0->목표 진행만 보여준다
+    -- the raw counter overshoots the target (163/150); clamp so it reads as plain 0->target progress
+    local shown_kill = st.kill
+    if st.target > 0 and shown_kill > st.target then
+        shown_kill = st.target
+    end
+    local line = string.format("{ol}{s16}%s %d  %d/%d{/}", progress, st.stage, shown_kill, st.target)
+    -- 챌린지가 끝난 뒤(HIDE)에는 남은시간이 의미 없다 / after HIDE the remaining time is meaningless
+    local remain = st.active and Challenge_helper_remain_sec() or nil
+    if remain then
+        line = line .. string.format("{ol}{s16}  %d:%02d{/}", math.floor(remain / 60), math.floor(remain % 60))
+    end
+    local progress_text = GET_CHILD(challenge_helper, "progress_text")
+    AUTO_CAST(progress_text)
+    progress_text:SetText(line)
+
+    local my_pos = Challenge_helper_my_pos()
+    local boss = Challenge_helper_nearest_boss(my_pos)
+    local boss_text = GET_CHILD(challenge_helper, "boss_text")
+    AUTO_CAST(boss_text)
+    local boss_label = g.lang == "Japanese" and "ボス" or g.lang == "kr" and "보스" or "Boss"
+    if boss then
+        boss_text:SetText(string.format("{ol}{s16}{#FFD200}%s : %dm{/}", boss_label, boss.dist))
+        if not st.boss_notified then
+            st.boss_notified = true
+            Challenge_helper_notify(g.lang == "Japanese" and "{ol}[Challenge Helper] ボスが出現しました" or g.lang ==
+                                        "kr" and "{ol}[Challenge Helper] 보스가 등장했습니다" or
+                                        "{ol}[Challenge Helper] The boss has appeared")
+        end
+        if g.challenge_helper_settings.minimap_mark == 1 then
+            pcall(session.minimap.AddIconInfo, g.challenge_helper.boss_mark_key, "trasuremapmark", boss.pos.x,
+                boss.pos.y, boss.pos.z, boss_label, true, nil, 1.5)
+            st.boss_marked = true
+        end
+    else
+        boss_text:SetText(string.format("{ol}{s16}{#909090}%s : -{/}", boss_label))
+        Challenge_helper_remove_boss_mark()
+    end
+
+    local portal_text = GET_CHILD(challenge_helper, "portal_text")
+    AUTO_CAST(portal_text)
+    local portal_label = g.lang == "Japanese" and "ポータル" or g.lang == "kr" and "포탈" or "Portal"
+    if st.portal and my_pos then
+        portal_text:SetText(string.format("{ol}{s16}{#66DD66}%s : %dm{/}", portal_label,
+            Challenge_helper_dist(my_pos, st.portal)))
+    else
+        portal_text:SetText(string.format("{ol}{s16}{#909090}%s : -{/}", portal_label))
+    end
+end
+
+function Challenge_helper_remove_boss_mark()
+    if not g.ch_state or not g.ch_state.boss_marked then
+        return
+    end
+    pcall(session.minimap.RemoveIconInfo, g.challenge_helper.boss_mark_key)
+    g.ch_state.boss_marked = false
+end
+
+function Challenge_helper_clear()
+    Challenge_helper_remove_boss_mark()
+    local _nexus_addons = ui.GetFrame("_nexus_addons")
+    if _nexus_addons then
+        local challenge_helper_timer = GET_CHILD(_nexus_addons, "challenge_helper_timer")
+        if challenge_helper_timer then
+            AUTO_CAST(challenge_helper_timer)
+            challenge_helper_timer:Stop()
+        end
+    end
+    ui.DestroyFrame(addon_name_lower .. "challenge_helper")
+end
+
+function Challenge_helper_pos(challenge_helper)
+    g.challenge_helper_settings.frame_x = challenge_helper:GetX()
+    g.challenge_helper_settings.frame_y = challenge_helper:GetY()
+    Challenge_helper_save_settings()
+end
+
+function Challenge_helper_settings_frame_init()
+    local challenge_helper_settings = ui.CreateNewFrame("chat_memberlist",
+        addon_name_lower .. "challenge_helper_settings")
+    AUTO_CAST(challenge_helper_settings)
+    local list_frame = ui.GetFrame(addon_name_lower .. "list_frame")
+    challenge_helper_settings:SetPos(list_frame:GetX() + list_frame:GetWidth(), list_frame:GetY())
+    challenge_helper_settings:EnableHitTest(1)
+    challenge_helper_settings:SetLayerLevel(999)
+    challenge_helper_settings:SetSkinName("test_frame_low")
+    local width = 0
+    local title = challenge_helper_settings:CreateOrGetControl('richtext', 'title', 20, 10, 10, 30)
+    AUTO_CAST(title)
+    title:SetText("{#000000}{s20}Challenge Helper Settings")
+    width = width + 20 + title:GetWidth() + 40
+    local close = challenge_helper_settings:CreateOrGetControl('button', 'close', 0, 0, 20, 20)
+    AUTO_CAST(close)
+    close:SetImage("testclose_button")
+    close:SetGravity(ui.RIGHT, ui.TOP)
+    close:SetEventScript(ui.LBUTTONUP, "Challenge_helper_setting_frame_close")
+    local challenge_helper_gb = challenge_helper_settings:CreateOrGetControl("groupbox", "challenge_helper_gb", 10, 40,
+        100, 100)
+    AUTO_CAST(challenge_helper_gb)
+    challenge_helper_gb:SetSkinName("bg")
+    challenge_helper_gb:RemoveAllChild()
+    local notify = challenge_helper_gb:CreateOrGetControl('richtext', 'notify', 10, 10)
+    AUTO_CAST(notify)
+    notify:SetText(g.lang == "Japanese" and "{ol}通知 (1=ON / 0=OFF)" or g.lang == "kr" and
+                       "{ol}알림 (1=ON / 0=OFF)" or "{ol}Notify (1=ON / 0=OFF)")
+    local notify_edit = challenge_helper_gb:CreateOrGetControl('edit', 'notify_edit', notify:GetWidth() + 20, 5, 60, 30)
+    AUTO_CAST(notify_edit)
+    notify_edit:SetText("{ol}" .. g.challenge_helper_settings.notify)
+    notify_edit:SetFontName("white_16_ol")
+    notify_edit:SetTextAlign("center", "center")
+    notify_edit:SetNumberMode(1)
+    notify_edit:SetEventScript(ui.ENTERKEY, "Challenge_helper_setting")
+    notify_edit:SetTextTooltip(g.lang == "Japanese" and "{ol}エンターキー押下で登録" or g.lang == "kr" and
+                                   "{ol}엔터 키를 눌러 등록" or "{ol}Register by pressing enter key")
+    local mark = challenge_helper_gb:CreateOrGetControl('richtext', 'mark', 10, 45)
+    AUTO_CAST(mark)
+    mark:SetText(g.lang == "Japanese" and "{ol}ミニマップマーカー (1=ON / 0=OFF)" or g.lang == "kr" and
+                     "{ol}미니맵 마커 (1=ON / 0=OFF)" or "{ol}Minimap mark (1=ON / 0=OFF)")
+    local mark_edit = challenge_helper_gb:CreateOrGetControl('edit', 'mark_edit', mark:GetWidth() + 20, 40, 60, 30)
+    AUTO_CAST(mark_edit)
+    mark_edit:SetText("{ol}" .. g.challenge_helper_settings.minimap_mark)
+    mark_edit:SetFontName("white_16_ol")
+    mark_edit:SetTextAlign("center", "center")
+    mark_edit:SetNumberMode(1)
+    mark_edit:SetEventScript(ui.ENTERKEY, "Challenge_helper_setting")
+    mark_edit:SetTextTooltip(g.lang == "Japanese" and "{ol}エンターキー押下で登録" or g.lang == "kr" and
+                                 "{ol}엔터 키를 눌러 등록" or "{ol}Register by pressing enter key")
+    local probe = challenge_helper_gb:CreateOrGetControl('richtext', 'probe', 10, 80)
+    AUTO_CAST(probe)
+    probe:SetText(g.lang == "Japanese" and "{ol}地形診断 (1=実行)" or g.lang == "kr" and "{ol}지형 진단 (1=실행)" or
+                      "{ol}Terrain probe (1=run)")
+    local probe_edit = challenge_helper_gb:CreateOrGetControl('edit', 'probe_edit', probe:GetWidth() + 20, 75, 60, 30)
+    AUTO_CAST(probe_edit)
+    probe_edit:SetText("{ol}" .. g.challenge_helper_settings.probe)
+    probe_edit:SetFontName("white_16_ol")
+    probe_edit:SetTextAlign("center", "center")
+    probe_edit:SetNumberMode(1)
+    probe_edit:SetEventScript(ui.ENTERKEY, "Challenge_helper_setting")
+    probe_edit:SetTextTooltip(g.lang == "Japanese" and "{ol}1でエンター押下時に周辺地形をdebug_log.txtへ出力" or g.lang ==
+                                 "kr" and "{ol}1로 엔터를 누르면 주변 지형을 debug_log.txt에 기록" or
+                                 "{ol}Enter 1 to dump the surrounding terrain to debug_log.txt")
+    local navi = challenge_helper_gb:CreateOrGetControl('richtext', 'navi', 10, 115)
+    AUTO_CAST(navi)
+    navi:SetText(g.lang == "Japanese" and "{ol}ナビメッシュ表示 (1=切替)" or g.lang == "kr" and
+                     "{ol}내비메시 표시 (1=토글)" or "{ol}Navmesh view (1=toggle)")
+    local navi_edit = challenge_helper_gb:CreateOrGetControl('edit', 'navi_edit', navi:GetWidth() + 20, 110, 60, 30)
+    AUTO_CAST(navi_edit)
+    navi_edit:SetText("{ol}" .. g.challenge_helper_settings.navi_debug)
+    navi_edit:SetFontName("white_16_ol")
+    navi_edit:SetTextAlign("center", "center")
+    navi_edit:SetNumberMode(1)
+    navi_edit:SetEventScript(ui.ENTERKEY, "Challenge_helper_setting")
+    navi_edit:SetTextTooltip(g.lang == "Japanese" and "{ol}実験機能。効かない場合があります" or g.lang == "kr" and
+                                 "{ol}실험 기능 — 개발 플래그로 막혀 있을 수 있음" or
+                                 "{ol}Experimental - may be blocked by a dev flag")
+    if navi:GetWidth() + 100 > width then
+        width = navi:GetWidth() + 100
+    end
+    if mark:GetWidth() + 100 > width then
+        width = mark:GetWidth() + 100
+    end
+    challenge_helper_settings:Resize(width, 195)
+    challenge_helper_gb:Resize(challenge_helper_settings:GetWidth() - 20, 145)
+    challenge_helper_settings:ShowWindow(1)
+end
+
+function Challenge_helper_setting_frame_close(frame)
+    ui.DestroyFrame(addon_name_lower .. "challenge_helper_settings")
+end
+
+function Challenge_helper_setting(frame, ctrl)
+    local value = tonumber(ctrl:GetText())
+    if not value then
+        return
+    end
+    if value ~= 0 and value ~= 1 then
+        return
+    end
+    local ctrl_name = ctrl:GetName()
+    if ctrl_name == "notify_edit" then
+        g.challenge_helper_settings.notify = value
+    elseif ctrl_name == "mark_edit" then
+        g.challenge_helper_settings.minimap_mark = value
+        if value == 0 then
+            Challenge_helper_remove_boss_mark()
+        end
+    elseif ctrl_name == "navi_edit" then
+        g.challenge_helper_settings.navi_debug = value
+        -- 토글이라 0/1 어느 쪽이든 한 번 호출해 상태를 뒤집는다 / it is a toggle, so either value flips it
+        local ok, err = pcall(Challenge_helper_navi_debug_run)
+        if not ok then
+            g.log_to_file("[ch navi] ERROR: " .. tostring(err))
+            ui.SysMsg("{ol}[Challenge Helper] navi error - see debug_log.txt")
+        end
+    elseif ctrl_name == "probe_edit" then
+        g.challenge_helper_settings.probe = value
+        if value == 1 then
+            -- 여기서 터지면 게임이 스크립트 에러만 띄우고 원인이 안 남는다 / capture the reason on failure
+            local ok, err = pcall(Challenge_helper_probe_run)
+            if not ok then
+                g.log_to_file("[ch probe] ERROR: " .. tostring(err))
+                ui.SysMsg("{ol}[Challenge Helper] probe error - see debug_log.txt")
+            end
+        end
+    else
+        return
+    end
+    Challenge_helper_save_settings()
+end
+-- Challenge Helper end
 
 -- Auto Repaire ここから
 g.auto_repair = {
