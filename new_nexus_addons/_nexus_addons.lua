@@ -46,12 +46,13 @@
 -- 1.0.8 "VE v1.1.0: the weekly-boss checkbox no longer skips the map check entirely (gear used to swap on every non-city map), all on/off toggle, translucent config window. QSO: the joystick quickslot bar no longer disappears after a potion swap -- it is never hidden anymore, and the keyboard bar is shown at alpha 0 so it does not flash"
 -- 1.0.9 "Startup load time cut from 9.2s to 2.2s: market_voucher no longer keeps a duplicate json of its trade log (1,360 entries / 124KB were decoded and re-encoded on every login, 5.2s, even with the addon turned off) - the log txt is now the source of truth and is read only when the voucher window opens. The init throttle also went from 2 addons per 0.1s tick to 6 per 0.05s tick, which cut ~2.2s of pure waiting. AWH: favorite items - new star button left of TAKE SET opens a favorites picker (no count needed), favorites are pinned to the top of the list and get their own tab above All (tab column rescaled to fit 11 tabs). Non-stackable gear is tracked by item guid, so two copies of the same gear with different options register separately. Registering a favorite no longer scrolls the warehouse list back to the top, and all favorite strings now have Korean text"
 -- 1.1.0 "Challenge Helper: new addon showing a challenge-mode HUD (stage, kill count, remaining time) plus the horizontal distance to the nearest live boss and to the exit portal, with a minimap marker on the boss. Portal coordinates come from the game's own minimap-mark calls, which are hooked so the original marker still draws. OCSL: the representative-class icon on the left of each character now actually follows the class picked in ILV - the lookup read this bundle's own data under author \"norisan\" while this fork is authored as \"yomae\", so it never resolved; the id is also converted back to a number (it is stored as a string) and a missing class falls back to a placeholder icon instead of a nil image"
+-- 1.1.1 "EP18.2 support. IP: the two new Uriel raids (False Radiance / Fallen Judgment) and the Sanctuary of Resonance are on the panel, challenge and singularity each move up one tier (Lv.520 dropped, Lv.540 / Lv.560 with a PT button), the Saule certificate shop joins the shortcut row, and the removed Ashaq dungeon no longer draws a dead row. The remaining-entry lookup no longer uses a hand-written dungeon id list - it reads UnitPerReset / CheckCountName off the dungeon class, so the new Lv.560 tiers report the right count instead of always 0 (which also made the panel keep spending tickets). ILV: the two new raids are listed and the settings version is bumped so existing saves get their checkboxes. AR: the Lv.560 emergency repair kit from the Saule shop replaces the Lv.550 one"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.1.0"
+local ver = "1.1.1"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -2588,20 +2589,62 @@ local IP_ICON_GAP = ip_s(4) -- アイコン同士は文字ボタンより詰め�
 local IP_ICON_STEP = ip_s(30) -- ショートカットアイコンを並べる送り幅
 -- 展開時のパネル最小幅。実際の幅はバーの実測値(g.indun_panel_bar_w)と比較して広い方を使う
 local IP_PANEL_W = ip_s(750)
+-- 단축 아이콘 목록. 예전엔 같은 목록이 세 벌(아이콘 줄 그리기 / 설정창 체크박스 /
+-- 기본 설정 cols)이었다 -> 하나만 고치면 아이콘이 안 나오거나 저장이 안 되는 증상이 난다.
+-- one list drives the icon row, the config checkboxes and the default settings
+local IP_SHORTCUTS = {
+    {name = "tos", img = "icon_item_Tos_Event_Coin"},
+    {name = "gabija", img = "goddess_shop_btn"},
+    {name = "vakarine", img = "goddess2_shop_btn"},
+    {name = "rada", img = "goddess3_shop_btn"},
+    {name = "jurate", img = "goddess4_shop_btn"},
+    {name = "austeja", img = "goddess5_shop_btn"},
+    -- EP18.2 신규 인증서 상점(사울레). 스킨은 패치 406266 에 들어왔다
+    -- EP18.2 added the Saule certificate shop; its skin arrived in patch 406266
+    {name = "saule", img = "goddess6_shop_btn"},
+    {name = "pvp_mine", img = "pvpmine_shop_btn_total"},
+    {name = "market", img = "market_shortcut_btn02"},
+    {name = "craft", img = "icon_fullscreen_menu_equipment_processing"},
+    {name = "leticia", img = "icon_fullscreen_menu_letica"},
+}
+
 local induns = {{
+    -- 하위 키는 **그리는 횟수**다(아래 dispatch 가 pairs 로 돌며 프레임 함수를 부른다).
+    -- 프레임 함수가 등급 ID 를 자기가 들고 있으므로 하나면 충분하다. 예전에는 등급마다 키를
+    -- 두어 같은 자리를 두세 번 그렸고, 분열은 컨트롤 이름에 indun_type 이 붙어 있어
+    -- 버튼이 두 벌 겹쳐 있었다.
+    -- one sub-key = one draw pass; the frame itself owns the tier ids
     challenge = {
-        solo_520 = 1001,
-        solo_540 = 1004,
-        pt_540 = 1005,
+        row = 1004, -- Lv.540 / Lv.560(1006, PT 1007) 두 칸을 이 프레임이 그린다
         jp = "チャレンジ",
         icon = {"Item", 490363}
     }
 }, {
     singularity = {
-        singularity_520 = 2000,
-        singularity_540 = 2001,
+        row = 2001, -- Lv.540 / Lv.560(2003) 두 칸
         jp = "分裂特異点",
         icon = {"Item", 11030017}
+    }
+}, {
+    -- EP18.2 신규 레이드 2종 (2026-09-01 패치, indun.ies 733/734/736/737).
+    -- 파티(Hard)는 넣지 않는다 — 아직 오픈 전이라 indun.ies 에 행 자체가 없다(735/738 없음).
+    -- 오픈되면 h = <새 ID> 한 줄만 추가하면 된다.
+    -- ac = 자동 소탕 카운트 버프(buff.ies). 거짓된 광휘 80049 / 타락한 심판 80051
+    -- hard mode is not in indun.ies yet; add `h` when it opens
+    light_uriel = {
+        s = 734,
+        a = 733,
+        ac = 80049,
+        jp = "偽りの光輝の翼",
+        icon = {"Monster", 71120}
+    }
+}, {
+    dark_uriel = {
+        s = 737,
+        a = 736,
+        ac = 80051,
+        jp = "堕落した審判の翼",
+        icon = {"Monster", 71123}
     }
 }, {
     zmei = {
@@ -2764,8 +2807,22 @@ local induns = {{
 }, {
     ashaq = {
         id = 728,
+        -- 2026-09-01 패치로 게임에서 없어졌다(indun.ies 에서 728 행이 지워졌다).
+        -- 그런데 GetClassByType("Indun", 728) 은 여전히 값을 준다 -> 아래 자동 가드로는
+        -- 못 거른다(클라가 클래스 자체는 들고 있다). 그래서 여기에 손으로 표시한다.
+        -- 되살아나면 이 한 줄만 지우면 된다.
+        -- hand-marked: the client still answers for this class even though the row is gone
+        retired = true,
         jp = "アシャーク",
         icon = {"Item", 11200484}
+    }
+}, {
+    -- 공명의 성소: 자우라 (732, EP18.2). 1회 입장권으로 들어가는 단일 인던이라
+    -- 아샤크와 같은 모양이다. 자리도 아샤크 아래에 둔다(이 배열 순서가 곧 화면 순서다)
+    zawra = {
+        id = 732,
+        jp = "共鳴の聖所",
+        icon = {"Monster", 58087}
     }
 }, {
     jsr = {
@@ -2783,9 +2840,10 @@ function Indun_panel_load_settings()
     g.indun_panel_path = string.format("../addons/%s/%s/indun_panel.json", addon_name_lower, g.active_id)
     g.indun_panel_old_path = string.format("../addons/%s/%s/settings.json", "indun_panel", g.active_id)
     local settings = g.load_json(g.indun_panel_path)
-    local indun_keys = {"challenge", "singularity", "zmei", "belliora", "laimara", "ledania", "neringa", "golem", "merregina",
+    local indun_keys = {"challenge", "singularity", "light_uriel", "dark_uriel", "zmei", "belliora", "laimara",
+                        "ledania", "neringa", "golem", "merregina",
                         "slogutis", "upinis", "roze", "falouros", "reservoir", "jellyzele", "delmore", "telharsha",
-                        "bernice", "giltine", "memory", "wailing", "ashaq", "jsr"}
+                        "bernice", "giltine", "memory", "wailing", "ashaq", "zawra", "jsr"}
     local json_to_indun_map = {
         veliora = "belliora",
         limara = "laimara",
@@ -2828,6 +2886,7 @@ function Indun_panel_load_settings()
                 rada = 1,
                 jurate = 1,
                 austeja = 1,
+                saule = 1,
                 pvp_mine = 1,
                 market = 1,
                 craft = 1,
@@ -2884,6 +2943,18 @@ function Indun_panel_load_settings()
                     end
                 end
             end
+        end
+    end
+    -- 새로 추가된 단축 아이콘은 기존 저장본에 키가 없다. 그러면 아이콘 그리기가
+    -- cols[key] == 1 로 걸러서 안 나오고, 설정창에서 체크해도 저장되지 않는다
+    -- (Indun_panel_ischecked 가 값의 참거짓을 봤다 -> 거기서 같이 고쳤다).
+    -- a newly added shortcut key is missing from saved settings: fill it in
+    if type(settings.cols) ~= "table" then
+        settings.cols = {}
+    end
+    for _, sc in ipairs(IP_SHORTCUTS) do
+        if settings.cols[sc.name] == nil then
+            settings.cols[sc.name] = 1
         end
     end
     -- 旧デフォルト(chat_window_2)のままの環境を cupole HUD と同じ見た目へ一度だけ寄せる。
@@ -2954,7 +3025,10 @@ end
 function Indun_panel_INDUN_ALREADY_PLAYING_dilay()
     local indunenter = ui.GetFrame("indunenter")
     local indun_type = indunenter:GetUserIValue('INDUN_TYPE')
-    if indun_type == 1005 or indun_type == 2000 or indun_type == 2001 then -- 1005＝540チャレPT 2001＝540分裂
+    -- EP18.2 로 등급이 올라가면서 여기 ID 도 같이 옮겼다(1005/2000 은 indun.ies 에서 사라졌다).
+    -- 1007 = 560 챌린지 PT / 2001 = 540 분열 / 2003 = 560 분열
+    -- the tier bump moved these ids too; the old ones no longer exist in indun.ies
+    if indun_type == 1007 or indun_type == 2001 or indun_type == 2003 then
         AnsGiveUpPrevPlayingIndun(1)
         ui.CloseFrame("indunenter")
         ReserveScript(string.format("Indun_panel_enter_singularity(nil,nil,'', %d)", indun_type), 0.5)
@@ -3192,8 +3266,10 @@ function Indun_panel_frame_init(is_toggle, msg)
     btn:SetTextTooltip(g.lang == "Japanese" and IP_TIP_OL .. "右クリック: 常時展開で開く" or
                            IP_TIP_OL .. "Right click: Open in Always Expand")
     local x = Indun_panel_create_common_buttons(indun_panel)
-    local button_keys = {"tos", "gabija", "vakarine", "rada", "jurate", "austeja", "pvp_mine", "market", "craft",
-                         "leticia"}
+    local button_keys = {}
+    for _, sc in ipairs(IP_SHORTCUTS) do
+        table.insert(button_keys, sc.name)
+    end
     local right = x - IP_ICON_GAP -- アイコンが1つも無い場合の右端
     for _, key_name in ipairs(button_keys) do
         local value = g.indun_panel_settings.cols[key_name]
@@ -3328,6 +3404,16 @@ function Indun_panel_create_shortcut_button(indun_panel, key_name, x)
         tooltip_msg = (g.lang == "Japanese" and IP_TIP_OL .. "アウステヤショップ{nl}" or IP_TIP_OL .. "Austeja Shop{nl}") ..
                           "{#FFFF00}" .. coin_count
         btn:SetEventScript(ui.LBUTTONUP, "REQ_AustejaCertificate_SHOP_OPEN")
+    elseif key_name == "saule" then
+        -- EP18.2 신규 인증서 상점. 버튼 스킨 goddess6_shop_btn 은 패치 406266 에 들어왔다
+        -- (클라 자신도 minimized_certificate_shop_button.xml 에서 같은 그림을 쓴다)
+        -- the Saule shop; its button skin arrived with patch 406266
+        btn = indun_panel:CreateOrGetControl("button", "saule", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img goddess6_shop_btn %d %d}", IP_ICON, IP_ICON))
+        coin_count = GET_COMMAED_STRING(TryGetProp(account_obj, "SauleCertificate", "0"))
+        tooltip_msg = (g.lang == "Japanese" and IP_TIP_OL .. "サウレショップ{nl}" or IP_TIP_OL .. "Saule Shop{nl}") ..
+                          "{#FFFF00}" .. coin_count
+        btn:SetEventScript(ui.LBUTTONUP, "REQ_SauleCertificate_SHOP_OPEN")
     elseif key_name == "pvp_mine" then
         btn = indun_panel:CreateOrGetControl("button", "pvp_mine", x, IP_ICON_Y, IP_ICON, IP_ICON)
         btn:SetText(string.format("{img pvpmine_shop_btn_total %d %d}", IP_ICON, IP_ICON))
@@ -3457,8 +3543,10 @@ function Indun_panel_frame_open(indun_panel)
     configbtn:SetEventScript(ui.LBUTTONUP, "Indun_panel_setting_frame_open")
     configbtn:SetTextTooltip(g.lang == "Japanese" and IP_TIP_OL .. "Indun Panel 設定" or IP_TIP_OL .. "Indun Panel Config")
     x = x + IP_ICON + IP_ICON_GAP
-    local button_keys = {"tos", "gabija", "vakarine", "rada", "jurate", "austeja", "pvp_mine", "market", "craft",
-                         "leticia"}
+    local button_keys = {}
+    for _, sc in ipairs(IP_SHORTCUTS) do
+        table.insert(button_keys, sc.name)
+    end
     for _, key_name in ipairs(button_keys) do
         local value = g.indun_panel_settings.cols[key_name]
         if value == 1 then
@@ -3535,14 +3623,25 @@ function Indun_panel_ischecked(indun_panel, ctrl)
     local ctrlname = ctrl:GetName()
     local current_set = g.indun_panel_settings.etc.use_set
     local use_tbl = g.indun_panel_settings[current_set]
-    if use_tbl and use_tbl[ctrlname] then
-        use_tbl[ctrlname] = ischeck
-    elseif g.indun_panel_settings.cols then
-        if g.indun_panel_settings.cols[ctrlname] then
-            g.indun_panel_settings.cols[ctrlname] = ischeck
+    -- 값이 아니라 **키의 존재**를 본다. 예전에는 if use_tbl[name] then 처럼 값의 참거짓을
+    -- 봐서, 키가 아직 없는(nil) 새 항목은 체크해도 조용히 저장되지 않았다(사울레 상점).
+    -- 0 은 Lua 에서 참이라 "꺼진 항목"이 동작한 것은 우연이었다.
+    -- test key existence, not truthiness: a missing key silently dropped the click
+    -- cols 에는 단축 목록에 있는 이름만 쓴다. 조건을 넓히면 etc 쪽 체크박스까지 cols 에 쌓인다
+    local is_col = false
+    for _, sc in ipairs(IP_SHORTCUTS) do
+        if sc.name == ctrlname then
+            is_col = true
+            break
         end
     end
-    if g.indun_panel_settings.etc[ctrlname] then
+    if use_tbl and use_tbl[ctrlname] ~= nil then
+        use_tbl[ctrlname] = ischeck
+    elseif is_col then
+        g.indun_panel_settings.cols = g.indun_panel_settings.cols or {}
+        g.indun_panel_settings.cols[ctrlname] = ischeck
+    end
+    if g.indun_panel_settings.etc[ctrlname] ~= nil then
         g.indun_panel_settings.etc[ctrlname] = ischeck
     end
     if ctrlname == "move" then
@@ -3608,47 +3707,9 @@ function Indun_panel_setting_frame_open() -- Indun_list_viewer_save_current_char
     skin_change:SetText("{ol}" .. ip_f(16) .. "SKIN SELECT")
     skin_change:SetTextTooltip(skin_text)
     local top_row_right = x + skin_w
-    local shortcut_icons = {{ -- ショートカットアイコンのチェックボックス作成をループ処理に
-        name = "tos",
-        img = "icon_item_Tos_Event_Coin",
-        size = 25
-    }, {
-        name = "gabija",
-        img = "goddess_shop_btn",
-        size = 29
-    }, {
-        name = "vakarine",
-        img = "goddess2_shop_btn",
-        size = 29
-    }, {
-        name = "rada",
-        img = "goddess3_shop_btn",
-        size = 29
-    }, {
-        name = "jurate",
-        img = "goddess4_shop_btn",
-        size = 29
-    }, {
-        name = "austeja",
-        img = "goddess5_shop_btn",
-        size = 29
-    }, {
-        name = "pvp_mine",
-        img = "pvpmine_shop_btn_total",
-        size = 29
-    }, {
-        name = "market",
-        img = "market_shortcut_btn02",
-        size = 29
-    }, {
-        name = "craft",
-        img = "icon_fullscreen_menu_equipment_processing",
-        size = 28
-    }, {
-        name = "leticia",
-        img = "icon_fullscreen_menu_letica",
-        size = 28
-    }}
+    -- ショートカットアイコンのチェックボックス作成をループ処理に
+    -- 목록은 IP_SHORTCUTS 하나뿐이다(예전엔 여기에도 같은 목록이 따로 있었다)
+    local shortcut_icons = IP_SHORTCUTS
     -- 上段ボタンの下から順に積む。チェックボックスは枠(スキン依存で縮まない)+画像の幅を取るので、
     -- 実測値 config_x をフレーム幅の計算にそのまま使う (足りないと最後の leticia が切れる)
     local icon_row_y = IP_PAD + IP_BTN_H + IP_BTN_GAP
@@ -3857,12 +3918,12 @@ end
 
 function Indun_panel_frame_contents(configbtn)
     local indun_panel = ui.GetFrame(addon_name_lower .. "indun_panel")
-    local shop_buttons = {"gabija", "vakarine", "rada", "jurate", "austeja"}
+    local shop_buttons = {"gabija", "vakarine", "rada", "jurate", "austeja", "saule"}
     local shop_props = {"GabijaCertificate", "VakarineCertificate", "RadaCertificate", "JurateCertificate",
-                        "AustejaCertificate"}
+                        "AustejaCertificate", "SauleCertificate"}
     local shop_names_jp = {"ガビヤショップ", "ヴァカリネショップ", "ラダショップ",
-                           "ユラテショップ", "アウステヤショップ"}
-    local shop_names_en = {"Gabija Shop", "Vakarine Shop", "Rada Shop", "Jurate Shop", "Austeja Shop"}
+                           "ユラテショップ", "アウステヤショップ", "サウレショップ"}
+    local shop_names_en = {"Gabija Shop", "Vakarine Shop", "Rada Shop", "Jurate Shop", "Austeja Shop", "Saule Shop"}
     local account_obj = GetMyAccountObj()
     for i, btn_name in ipairs(shop_buttons) do
         local btn = GET_CHILD_RECURSIVELY(indun_panel, btn_name)
@@ -3891,7 +3952,22 @@ function Indun_panel_frame_contents(configbtn)
     local lasy_y = 0
     for i, entry in ipairs(induns) do
         local key, value = next(entry)
-        if use_tbl[key] == 1 then
+        -- 게임에서 사라진 인던은 줄을 만들지 않는다. 남겨 두면 눌러도 아무 일도 없는
+        -- 버튼과 "(0)" 만 보인다. 판단은 두 가지다:
+        --   1) retired = true — 손으로 표시한 것(아샤크). 클라가 클래스를 지우지 않는 경우가
+        --      있어서 아래 자동 판별만으로는 못 거른다
+        --   2) GetClassByType 이 nil — 클라가 정말 잊은 경우. 되살아나면 저절로 다시 나온다
+        -- id 로 도는 단일 인던만 본다(s/a/h 형은 현역, jsr 은 id = 0 인 특수 항목이다)
+        -- skip dungeons the game removed; retired is hand-marked, the class check is automatic
+        local gone = false
+        if type(value) == "table" then
+            if value.retired == true then
+                gone = true
+            elseif type(value.id) == "number" and value.id > 0 then
+                gone = (GetClassByType("Indun", value.id) == nil)
+            end
+        end
+        if use_tbl[key] == 1 and not gone then
             if g.indun_panel_settings.etc.shading == 1 then
                 local line = indun_panel:CreateOrGetControl("picture", "line" .. key, ip_s(5), y - 2, panel_w - ip_s(10),
                     IP_ROW_H)
@@ -3954,7 +4030,8 @@ function Indun_panel_frame_contents(configbtn)
                             Indun_panel_singularity_frame(indun_panel, key, sub_key, sub_value, y, x)
                         end
                     end
-                elseif key == "zmei" or key == "belliora" or key == "laimara" or key == "ledania" or key == "neringa" or key == "golem" or
+                elseif key == "light_uriel" or key == "dark_uriel" or
+                    key == "zmei" or key == "belliora" or key == "laimara" or key == "ledania" or key == "neringa" or key == "golem" or
                     key == "merregina" or key == "slogutis" or key == "upinis" or key == "roze" or key == "falouros" or
                     key == "reservoir" then -- レイド系 (onsweep)
                     for sub_key, sub_value in pairs(value) do
@@ -3976,6 +4053,8 @@ function Indun_panel_frame_contents(configbtn)
                     Indun_panel_cemetery_frame(indun_panel, key, value.id, y, x)
                 elseif key == "ashaq" then
                     Indun_panel_demonlair_frame(indun_panel, key, value.id, y, x)
+                elseif key == "zawra" then
+                    Indun_panel_create_common_ticket_frame(indun_panel, key, value.id, y, x)
                 elseif key == "jsr" then
                     Indun_panel_jsr_frame(indun_panel, y, x)
                 end
@@ -4128,23 +4207,29 @@ function Indun_panel_get_entrance_count(indun_type, index)
         end
         return string.format("{ol}{#FFFFFF}%s(%s/%s)", ip_f(16), count, max_count)
     elseif index == 4 then
-        if indun_type == 1001 then
-            return current_count
-        elseif indun_type == 1004 or indun_type == 1005 or indun_type == 2000 or indun_type == 2001 then
-            local class_name = TryGetProp(indun_cls, 'ClassName', 'None')
-            if string.find(class_name, 'Challenge_') then
-                local unit_per_reset = TryGetProp(indun_cls, 'UnitPerReset', 'None')
-                local check_name = TryGetProp(indun_cls, 'CheckCountName', 'None')
-                if unit_per_reset ~= 'None' and check_name ~= 'None' then
-                    if unit_per_reset == 'ACCOUNT' then
-                        return TryGetProp(GetMyAccountObj(), check_name, 0) or 0
-                    elseif unit_per_reset == 'PC' then
-                        return TryGetProp(GetMyEtcObject(), check_name, 0) or 0
-                    end
+        -- 예전에는 인던 ID 를 손으로 나열했다(1001/1004/1005/2000/2001). 등급이 올라가
+        -- 1006 / 1007 / 2003 이 생기자 목록에 없어서 항상 0 을 돌려줬다 ->
+        -- "560 입장권을 먹었는데 갈 수 있는 횟수가 안 오른다".
+        -- 더 나쁜 것: 티켓 사용 판단이 이 값을 보므로 0 이면 계속 티켓을 쓰려 든다.
+        -- 판단은 클래스 자신의 값으로 한다(indun.ies 실측):
+        --   1004/1006/1007 -> UnitPerReset=PC,      CheckCountName=ChallengeModeCompleteCount_<등급>
+        --   2000/2001/2003 -> UnitPerReset=ACCOUNT, CheckCountName=ChallengeMode_HardMode_EnableEntryCount_<등급>
+        --   1001           -> CheckCountName 이 빈 문자열 -> 아래 current_count 로 떨어진다
+        -- 빈 문자열 검사를 빼면 안 된다. TryGetProp 는 없는 값에 'None' 이 아니라 "" 를 준다
+        -- driven by the class's own props instead of a hand-written id list
+        local class_name = TryGetProp(indun_cls, 'ClassName', 'None')
+        if string.find(class_name, 'Challenge_') then
+            local unit_per_reset = TryGetProp(indun_cls, 'UnitPerReset', 'None')
+            local check_name = TryGetProp(indun_cls, 'CheckCountName', 'None')
+            if unit_per_reset ~= 'None' and check_name ~= 'None' and check_name ~= '' then
+                if unit_per_reset == 'ACCOUNT' then
+                    return TryGetProp(GetMyAccountObj(), check_name, 0) or 0
+                elseif unit_per_reset == 'PC' then
+                    return TryGetProp(GetMyEtcObject(), check_name, 0) or 0
                 end
             end
         end
-        return 0
+        return current_count
     end
     return 0
 end
@@ -4212,30 +4297,38 @@ function Indun_panel_get_invitem_count(tbl)
     return count
 end
 
+-- EP18.2 로 한 단계씩 올렸다: 520 은 없애고 540 / 560 두 칸.
+--   LOW  = Lv.540 (indun 1004) — TOS 코인 상점 EVENT_TOS_WHOLE_SHOP_320
+--   HIGH = Lv.560 (indun 1006 단독 / 1007 파티) — TOS 322 · PVP 광산 PVP_MINE_40
+-- 상점이 파는 등급도 패치로 같이 올라갔다: 예전 520 자리의 EVENT_TOS_WHOLE_SHOP_315 는
+-- 이제 챌린지 입장권이 아니라 레이드 입장권을 판다 -> 520 을 남길 이유가 없다.
+-- 상점판은 아이템 이름 규칙이 다르다(Event_560ChallengeModeReset_limit_renew = 10820054)
 local CHALLENGE_CONFIG = {
-    LOW = {
-        expiring = {10820019, 11030080, 641954, 641955, 641969},
-        non_expiring = {10000073, 10820028, 490363, 641953, 641963, 641987}
-    },
-    HIGH = {
+    LOW = { -- Lv.540
         expiring = {11201299, 11201300, 10820052},
         non_expiring = {11201298, 11201297}
+    },
+    HIGH = { -- Lv.560 (11202128~11202131 + TOS 코인판 10820054)
+        expiring = {11202130, 11202131, 10820054},
+        non_expiring = {11202128, 11202129}
     }
 }
 function Indun_panel_challenge_frame(indun_panel, key, sub_key, indun_type, y, x)
-    local low_indun_type = 1001
+    local low_indun_type = 1004 -- Lv.540 1인 (예전 520 자리)
     local btn_low = indun_panel:CreateOrGetControl('button', "btn_low", x + 0, y, ip_s(50), ip_s(30))
     AUTO_CAST(btn_low)
-    btn_low:SetText("{ol}" .. ip_f(16) .. "520")
+    btn_low:SetText("{ol}" .. ip_f(16) .. "540")
     btn_low:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_challenge")
     btn_low:SetEventScriptArgString(ui.LBUTTONUP, "1")
     btn_low:SetEventScriptArgNumber(ui.LBUTTONUP, low_indun_type)
     local txt_low = indun_panel:CreateOrGetControl("richtext", "txt_low", x + ip_s(50), y + ip_s(5), ip_s(40), ip_s(30))
-    txt_low:SetText(Indun_panel_get_entrance_count(low_indun_type, 2))
+    -- index 2 는 PlayPerResetType 기반이라 540 부터는 (0/0) 만 나온다(그 값이 0 이다).
+    -- 520 자리였을 때만 맞던 방식이다 -> 높은 칸과 같은 index 3 을 쓴다
+    txt_low:SetText(Indun_panel_get_entrance_count(low_indun_type, 3))
     local buyuse_low = indun_panel:CreateOrGetControl('button', "buyuse_low", x + ip_s(90), y, ip_s(100), ip_s(30))
     AUTO_CAST(buyuse_low)
     local text_low = string.format("{ol}%s{#EE7800}USEor{img %s %d %d}{#FFFFFF}%s", ip_f(16), "icon_item_Tos_Event_Coin",
-        ip_s(15), ip_s(15), Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_315") or 0)
+        ip_s(15), ip_s(15), Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_320") or 0)
     local count = Indun_panel_get_invitem_count(CHALLENGE_CONFIG.LOW.expiring)
     count = count + Indun_panel_get_invitem_count(CHALLENGE_CONFIG.LOW.non_expiring)
     local icon_text = ""
@@ -4252,11 +4345,11 @@ function Indun_panel_challenge_frame(indun_panel, key, sub_key, indun_type, y, x
     buyuse_low:SetText(text_low)
     buyuse_low:SetEventScript(ui.LBUTTONUP, "Indun_panel_challenge_item_use")
     buyuse_low:SetEventScriptArgNumber(ui.LBUTTONUP, low_indun_type)
-    local high_indun_type = 1004
-    local high_pt_indun_type = 1005
+    local high_indun_type = 1006 -- Lv.560 1인
+    local high_pt_indun_type = 1007 -- Lv.560 자동매칭(파티)
     local btn_high = indun_panel:CreateOrGetControl('button', "btn_high", x + ip_s(195), y, ip_s(50), ip_s(30))
     AUTO_CAST(btn_high)
-    btn_high:SetText("{ol}" .. ip_f(16) .. "540")
+    btn_high:SetText("{ol}" .. ip_f(16) .. "560")
     btn_high:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_challenge")
     btn_high:SetEventScriptArgString(ui.LBUTTONUP, "1")
     btn_high:SetEventScriptArgNumber(ui.LBUTTONUP, high_indun_type)
@@ -4283,7 +4376,7 @@ function Indun_panel_challenge_frame(indun_panel, key, sub_key, indun_type, y, x
     end
     local text_high_tos = string.format("{ol}%s{#EE7800}USEor{img %s %d %d}{#FFFFFF}%s",
         ip_f(16), "icon_item_Tos_Event_Coin", ip_s(15), ip_s(15),
-        Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_320") or 0)
+        Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_322") or 0)
     local tooltip_high_tos = g.lang == "Japanese" and
                                  IP_TIP_OL .. "左クリック: PT入場{nl}右クリック: ソロ入場{nl}優先順位{nl}1.期限付き{nl}2.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います){nl}3.期限なし" or
                                  IP_TIP_OL .. "Left Click: PT Entry{nl}Right Click: Solo Entry{nl}Priority{nl}1.Expiring{nl}2.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}3.Non-expiring"
@@ -4315,25 +4408,33 @@ end
 
 function Indun_panel_challenge_item_use(indun_panel, ctrl, mode, indun_type)
     local entrance_count = Indun_panel_get_entrance_count(indun_type, 4)
-    if indun_type == 1001 and entrance_count > 0 then -- 520は行ける場合0行けない場合1
-        Indun_panel_process_ticket(indun_type, mode, CHALLENGE_CONFIG.LOW)
-    elseif indun_type ~= 1001 and entrance_count == 0 then -- 540は行ける場合1行けない場合0
-        Indun_panel_process_ticket(indun_type, mode, CHALLENGE_CONFIG.HIGH)
+    -- 남은 입장 횟수가 0 일 때만 입장권을 쓴다(있으면 그냥 들어가면 된다)
+    -- only spend a ticket when there is no entry left
+    if entrance_count ~= 0 then
+        return
+    end
+    if indun_type == 1004 then
+        Indun_panel_process_ticket(indun_type, mode, CHALLENGE_CONFIG.LOW) -- Lv.540
+    else
+        Indun_panel_process_ticket(indun_type, mode, CHALLENGE_CONFIG.HIGH) -- Lv.560 (1006/1007)
     end
 end
 
 function Indun_panel_process_ticket(indun_type, mode, config)
-    local enter_mode = indun_type == 1005 and 2 or 1
+    -- 파티 입장은 1007(Lv.560 자동매칭)뿐이다. 예전 1005(540 파티)는 indun.ies 에서 사라졌다
+    local enter_mode = indun_type == 1007 and 2 or 1
     if Indun_panel_use_prioritized_ticket(config.expiring, enter_mode, indun_type) then
         return
     end
+    -- 어느 상점이 그 등급을 파는가. 560 은 두 상점 다 판다 -> 누른 버튼(mode)이 정한다
+    --   540 = TOS 코인 320 / 560 = TOS 코인 322 · PVP 광산 40
     local recipe_name = ""
-    if indun_type == 1001 then
-        recipe_name = "EVENT_TOS_WHOLE_SHOP_315"
-    elseif mode == "tos" then
+    if indun_type == 1004 then
         recipe_name = "EVENT_TOS_WHOLE_SHOP_320"
     elseif mode == "pvp" then
         recipe_name = "PVP_MINE_40"
+    else
+        recipe_name = "EVENT_TOS_WHOLE_SHOP_322"
     end
     if Indun_panel_get_recipe_trade_count(recipe_name) >= 1 then
         Indun_panel_item_buy_use(recipe_name)
@@ -4420,21 +4521,24 @@ function Indun_panel_enter_challenge(indun_panel, ctrl, index, indun_type)
     ReserveScript(string.format("ReqMoveToIndun(%d,%d)", index, 0), 0.3)
 end
 
+-- 챌린지와 같이 한 단계씩 올렸다: 520 제거, 540 / 560 두 칸.
+--   540(2001) = TOS 코인 상점 EVENT_TOS_WHOLE_SHOP_319
+--   560(2003) = TOS 코인 321 · PVP 광산 PVP_MINE_41 / PVP_MINE_42
 local SINGULARITY_CONFIG = {
-    [2000] = { -- 520
-        expiring = {10820018, 11030067},
-        non_expiring = {10000470, 11030021, 11030017}
-    },
-    [2001] = { -- 540
+    [2001] = { -- Lv.540
         expiring = {11201303, 11201304, 10820051},
         non_expiring = {11201302, 11201301}
+    },
+    [2003] = { -- Lv.560 (11202138~11202141 + TOS 코인판 10820053)
+        expiring = {11202140, 11202141, 10820053},
+        non_expiring = {11202138, 11202139}
     }
 }
 function Indun_panel_singularity_frame(indun_panel, key, sub_key, indun_type, y, x)
-    local low_indun_type = 2000
+    local low_indun_type = 2001 -- Lv.540 (예전 520 자리)
     local btn_low = indun_panel:CreateOrGetControl('button', "btn_low" .. indun_type, x, y, ip_s(50), ip_s(30))
     AUTO_CAST(btn_low)
-    btn_low:SetText("{ol}" .. ip_f(16) .. "520")
+    btn_low:SetText("{ol}" .. ip_f(16) .. "540")
     btn_low:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_singularity")
     btn_low:SetEventScriptArgNumber(ui.LBUTTONUP, low_indun_type)
     local count_low = indun_panel:CreateOrGetControl("richtext", "count_low" .. indun_type, x + ip_s(55), y + ip_s(5),
@@ -4444,11 +4548,11 @@ function Indun_panel_singularity_frame(indun_panel, key, sub_key, indun_type, y,
         ip_s(30))
     AUTO_CAST(ticket_low)
     local text_low = string.format("{ol}%s{#EE7800}USEor{img %s %d %d}{#FFFFFF}%s", ip_f(16), "icon_item_Tos_Event_Coin",
-        ip_s(15), ip_s(15), Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_314") or 0)
-    local count = Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2000].expiring)
-    count = count + Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2000].non_expiring)
+        ip_s(15), ip_s(15), Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_319") or 0)
+    local count = Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2001].expiring)
+    count = count + Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2001].non_expiring)
     local icon_text = ""
-    local item_cls = GetClassByType('Item', SINGULARITY_CONFIG[2000].expiring[1])
+    local item_cls = GetClassByType('Item', SINGULARITY_CONFIG[2001].expiring[1])
     if item_cls then
         local fmt = g.lang == "Japanese" and IP_TIP_OL .. "{img %s 25 25 } %d枚持っています{nl} {nl}" or
                         IP_TIP_OL .. "{img %s 25 25 } Quantity in Inventory: %d{nl} {nl}"
@@ -4461,11 +4565,11 @@ function Indun_panel_singularity_frame(indun_panel, key, sub_key, indun_type, y,
     ticket_low:SetTextTooltip(icon_text .. tooltip_low)
     ticket_low:SetEventScript(ui.LBUTTONUP, "Indun_panel_item_use_sin")
     ticket_low:SetEventScriptArgNumber(ui.LBUTTONUP, low_indun_type)
-    local high_indun_type = 2001
+    local high_indun_type = 2003 -- Lv.560
     local btn_high = indun_panel:CreateOrGetControl('button', "btn_high" .. indun_type, x + ip_s(195), y, ip_s(50),
         ip_s(30))
     AUTO_CAST(btn_high)
-    btn_high:SetText("{ol}" .. ip_f(16) .. "540")
+    btn_high:SetText("{ol}" .. ip_f(16) .. "560")
     btn_high:SetEventScript(ui.LBUTTONUP, "Indun_panel_enter_singularity")
     btn_high:SetEventScriptArgNumber(ui.LBUTTONUP, high_indun_type)
     local count_high = indun_panel:CreateOrGetControl("richtext", "count_high" .. indun_type, x + ip_s(250),
@@ -4476,11 +4580,11 @@ function Indun_panel_singularity_frame(indun_panel, key, sub_key, indun_type, y,
     AUTO_CAST(ticket_high_tos)
     local text_high_tos = string.format("{ol}%s{#EE7800}USEor{img %s %d %d}{#FFFFFF}%s",
         ip_f(16), "icon_item_Tos_Event_Coin", ip_s(15), ip_s(15),
-        Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_319") or 0)
-    local count = Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2001].expiring)
-    count = count + Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2001].non_expiring)
+        Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_321") or 0)
+    local count = Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2003].expiring)
+    count = count + Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2003].non_expiring)
     local icon_text_high = ""
-    local item_cls = GetClassByType('Item', SINGULARITY_CONFIG[2001].expiring[1])
+    local item_cls = GetClassByType('Item', SINGULARITY_CONFIG[2003].expiring[1])
     if item_cls then
         local fmt = g.lang == "Japanese" and IP_TIP_OL .. "{img %s 25 25 } %d枚持っています{nl} {nl}" or
                         IP_TIP_OL .. "{img %s 25 25 } Quantity in Inventory: %d{nl} {nl}"
@@ -4530,8 +4634,9 @@ function Indun_panel_item_use_sin(frame, ctrl, mode, indun_type)
     if Indun_panel_try_use_ticket_list(config.expiring, indun_type) then
         return
     end
-    if mode == "tos" or indun_type == 2000 then
-        local recipe = (indun_type == 2000) and "EVENT_TOS_WHOLE_SHOP_314" or "EVENT_TOS_WHOLE_SHOP_319"
+    -- 540(낮은 칸) 버튼은 mode 문자열을 넘기지 않는다(원본 그대로) -> 그 경우도 TOS 로 본다
+    if mode == "tos" or indun_type == 2001 then
+        local recipe = (indun_type == 2001) and "EVENT_TOS_WHOLE_SHOP_319" or "EVENT_TOS_WHOLE_SHOP_321"
         if Indun_panel_get_recipe_trade_count(recipe) >= 1 then
             Indun_panel_item_buy_use(recipe)
             ReserveScript(string.format("Indun_panel_enter_singularity(nil,nil,'', %d)", indun_type), 1.5)
@@ -4611,6 +4716,9 @@ function Indun_panel_enter_singularity(frame, ctrl, str, indun_type)
 end
 
 local raid_tbl = {
+    -- EP18.2: 거짓된 광휘 / 타락한 심판 (자동 매칭 ID 기준). 순서 = 거래가능 / 거래불가 / 7일
+    [733] = {11210072, 11210073, 11210074},
+    [736] = {11210076, 11210077, 11210078},
     [729] = {11210061, 11210062, 11210063},
     [725] = {11210057, 11210056, 11210055},
     [722] = {11210053, 11210052, 11210051},
@@ -4623,6 +4731,8 @@ local raid_tbl = {
     [679] = {108020026, 11200222, 11200221, 11200220}
 }
 local buff_ids = {
+    [733] = 80049, -- 거짓된 광휘의 날개 (Goddess_Raid_LightUriel_Auto_ClearBuff)
+    [736] = 80051, -- 타락한 심판의 날개 (Goddess_Raid_DarkUriel_Auto_ClearBuff)
     [729] = 80047, -- ズメイ
     [725] = 80045, -- ベリオラ
     [722] = 80043, -- ライマラ
@@ -5012,6 +5122,10 @@ function Indun_panel_enter_velnice_solo(indun_panel, ctrl, str, indun_type)
 end
 
 local DUNGEON_TICKET_CONFIG = {
+    [732] = { -- 공명의 성소: 자우라 (EP18.2)
+        label = "560",
+        tickets = {11210071, 11210070, 11210069}
+    },
     [684] = { -- (嘆きの墓地)
         label = "490",
         tickets = {11200276, 11200275, 11200274}
@@ -15362,8 +15476,27 @@ end
 -- Instant CC ここまで
 
 -- ndun_list_viewer ここから
-g.ilv_RAID_KEYS = {"Z", "V", "L", "R", "N", "G", "M", "S", "U", "RO", "F", "P", "D"}
+g.ilv_RAID_KEYS = {"LU", "DU", "Z", "V", "L", "R", "N", "G", "M", "S", "U", "RO", "F", "P", "D"}
 g.ilv_RAID_INFO = {
+    -- EP18.2 신규 레이드 2종 (indun.ies 733/734/736/737, 소탕 버프 80049/80051).
+    -- hard 를 넣지 않았다 — 파티(Hard)는 아직 오픈 전이라 indun.ies 에 행이 없다(735/738).
+    -- 표시·집계 코드가 전부 raid_info.hard 로 가드하므로 Hard 칸에서 자동으로 빠진다.
+    -- 오픈되면 hard = <새 ID> 한 줄만 넣으면 된다(ver 도 같이 올려야 체크박스가 생긴다)
+    -- no hard mode yet; every display path already guards on raid_info.hard
+    LU = {
+        name = "LightUriel",
+        solo = 734,
+        auto = 733,
+        icon = "icon_item_misc_boss_LightUriel",
+        sweep_buff = 80049
+    },
+    DU = {
+        name = "DarkUriel",
+        solo = 737,
+        auto = 736,
+        icon = "icon_item_misc_boss_DarkUriel",
+        sweep_buff = 80051
+    },
     Z = {
         name = "Zmei",
         hard = 731,
@@ -15479,7 +15612,11 @@ function Indun_list_viewer_load_settings()
     g.ilv_old_path = string.format("../addons/%s/%s/settings_2510.json", "indun_list_viewer", g.active_id)
     local settings = g.load_lua(g.ilv_path)
     local need_save = false
-    local ver = 1.1
+    -- 아래 마이그레이션(표시 기본값 채우기)은 ver 가 올라갈 때만 돈다.
+    -- 레이드를 추가하면 반드시 같이 올릴 것 — 안 올리면 기존 사용자의 저장본에 새 칸이 없어
+    -- 체크박스가 꺼진 채로 남는다. 1.2 = EP18.2 우리엘 2종 추가
+    -- bump this whenever a raid is added, or existing saves keep the new rows unchecked
+    local ver = 1.2
     if not settings then
         settings = g.load_json(json_path)
         if settings then
@@ -30062,10 +30199,15 @@ end
 -- Challenge Helper end
 
 -- Auto Repaire ここから
+-- EP18.2 로 Lv.560 키트가 나왔다. 구조는 그대로고 세 값만 바뀐다
+-- (구매 트랜잭션은 Certificate_SHOP 그대로 — earthtowershop.lua 가 타입만 바꿔 부른다).
+--   11201388 QuestReward_repairPotion_550 / AustejaCertificate_14 -> Lv.550 이하만 고친다
+--   11202105 QuestReward_repairPotion_560 / SauleCertificate_15   -> Lv.560 이하
+-- EP18.2 repair kit: same shape, only the item id and the shop it comes from changed
 g.auto_repair = {
-    item_cls_id = 11201388,
-    repair_item = "AustejaCertificate_14",
-    shop_type = "AustejaCertificate"
+    item_cls_id = 11202105,
+    repair_item = "SauleCertificate_15",
+    shop_type = "SauleCertificate"
 }
 function Auto_repair_save_settings()
     g.save_json(g.auto_repair_path, g.auto_repair_settings)
