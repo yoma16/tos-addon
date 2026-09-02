@@ -47,12 +47,13 @@
 -- 1.0.9 "Startup load time cut from 9.2s to 2.2s: market_voucher no longer keeps a duplicate json of its trade log (1,360 entries / 124KB were decoded and re-encoded on every login, 5.2s, even with the addon turned off) - the log txt is now the source of truth and is read only when the voucher window opens. The init throttle also went from 2 addons per 0.1s tick to 6 per 0.05s tick, which cut ~2.2s of pure waiting. AWH: favorite items - new star button left of TAKE SET opens a favorites picker (no count needed), favorites are pinned to the top of the list and get their own tab above All (tab column rescaled to fit 11 tabs). Non-stackable gear is tracked by item guid, so two copies of the same gear with different options register separately. Registering a favorite no longer scrolls the warehouse list back to the top, and all favorite strings now have Korean text"
 -- 1.1.0 "Challenge Helper: new addon showing a challenge-mode HUD (stage, kill count, remaining time) plus the horizontal distance to the nearest live boss and to the exit portal, with a minimap marker on the boss. Portal coordinates come from the game's own minimap-mark calls, which are hooked so the original marker still draws. OCSL: the representative-class icon on the left of each character now actually follows the class picked in ILV - the lookup read this bundle's own data under author \"norisan\" while this fork is authored as \"yomae\", so it never resolved; the id is also converted back to a number (it is stored as a string) and a missing class falls back to a placeholder icon instead of a nil image"
 -- 1.1.1 "EP18.2 support. IP: the two new Uriel raids (False Radiance / Fallen Judgment) and the Sanctuary of Resonance are on the panel, challenge and singularity each move up one tier (Lv.520 dropped, Lv.540 / Lv.560 with a PT button), the Saule certificate shop joins the shortcut row, and the removed Ashaq dungeon no longer draws a dead row. The remaining-entry lookup no longer uses a hand-written dungeon id list - it reads UnitPerReset / CheckCountName off the dungeon class, so the new Lv.560 tiers report the right count instead of always 0 (which also made the panel keep spending tickets). ILV: the two new raids are listed and the settings version is bumped so existing saves get their checkboxes. AR: the Lv.560 emergency repair kit from the Saule shop replaces the Lv.550 one"
+-- 1.1.2 "Muteki: fixed a client crash. When a buff you had set to announce in party chat ended, the party message was sent from inside the engine BUFF_REMOVE dispatch, which killed the client with an access violation (confirmed from a crash dump; the player was in a party, so a missing party was not the cause). The message text is still built at that moment but the send itself is deferred by one tick, out of the buff dispatch. Applies to the party-chat and nico-chat notifications, on buff start and buff end"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.1.1"
+local ver = "1.1.2"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -20633,6 +20634,8 @@ function Muteki_load_settings()
 end
 
 function muteki_on_init()
+    -- 입장 사이에 유실된 예약의 잔재를 버린다(Muteki_chat_later 주석 참고)
+    g.muteki_chat_q = nil
     if not g.muteki_settings then
         Muteki_load_settings()
     end
@@ -20693,6 +20696,51 @@ function muteki_on_init()
     end
     local _nexus_addons = ui.GetFrame("_nexus_addons")
     _nexus_addons:RunUpdateScript("Muteki_buffslot_script", 2.0)
+end
+
+-- 🔴 **버프 메시지 처리 도중에 엔진 채팅을 직접 부르면 클라가 죽는다.**
+-- 2026-09-02 크래시(사용자 신고): BUFF_REMOVE 처리 중 Muteki_handle_buff_end 가
+-- ui.Chat("/p <버프> end") 를 부르다 네이티브 uiChat_OLD 안에서 ACCESS_VIOLATION.
+--   덤프: release/dump/Client_tos_x64_[20260902-162449]_Stack.txt
+--   LastUseAddOnMsg: BUFF_REMOVE / RUN_CTHREAD: Muteki_BUFF_ON_MSG
+-- ⚠️ **파티 부재가 원인이 아니다** — 사용자 확인 결과 파티 중이었고 파티챗 알림도 켜져 있었다.
+--    남는 설명은 엔진이 버프 제거를 순회하는 중에 우리가 채팅(UI + 패킷)을 다시 부르는 재진입이다.
+-- 🔑 문자열은 **지금** 만든다(버프 클래스가 곧 사라진다). 전송만 한 틱 미룬다.
+-- Lua 에러가 아니라 네이티브 크래시라 로그에는 아무 흔적도 남지 않는다
+-- defer the engine call out of the buff dispatch; build the text now, send it later
+function Muteki_chat_flush()
+    local q = g.muteki_chat_q
+    g.muteki_chat_q = nil
+    if type(q) ~= "table" then
+        return
+    end
+    for _, m in ipairs(q) do
+        if m.nico then
+            NICO_CHAT(m.text)
+        else
+            ui.Chat(m.text)
+        end
+    end
+end
+
+local function Muteki_chat_later(text, nico)
+    if type(text) ~= "string" or text == "" then
+        return
+    end
+    if type(g.muteki_chat_q) ~= "table" then
+        g.muteki_chat_q = {}
+    end
+    table.insert(g.muteki_chat_q, {
+        text = text,
+        nico = nico
+    })
+    -- 🔴 예약은 **조건 없이** 건다. "큐가 빌 때만" 걸면 그 한 번의 예약이 유실될 때
+    --    (맵 이동·채널 변경·캐릭터 변경) 큐가 non-nil 로 남아 **그 뒤 모든 알림이 조용히 사라진다**
+    --    — g 는 _G["ADDONS"] 에 살아서 리로드로도 안 지워진다.
+    --    조건 없이 걸면 다음 호출이 스스로 회복시킨다. 중복 예약은 flush 가 큐를 nil 로 만들어
+    --    두 번째부터 즉시 반환하므로 비용이 없다
+    -- reserve unconditionally: a dropped reservation would otherwise wedge the queue forever
+    ReserveScript("Muteki_chat_flush()", 0.1)
 end
 
 function Muteki_BUFF_ON_MSG(frame, msg, is_dummy, buff_id)
@@ -20778,11 +20826,11 @@ function Muteki_BUFF_ON_MSG(frame, msg, is_dummy, buff_id)
             if g.muteki_buffs[buff_id_str] and g.muteki_buffs[buff_id_str].notify == 0 then
                 if buff_data.pt_chat == 1 then
                     if not string.find(buff_cls.Name, "NoData") then
-                        ui.Chat(string.format("/p %s start", buff_cls.Name))
+                        Muteki_chat_later(string.format("/p %s start", buff_cls.Name), false)
                     end
                 end
                 if buff_data.nico_chat == 1 then
-                    NICO_CHAT(string.format("{@st55_a}%s start", buff_name))
+                    Muteki_chat_later(string.format("{@st55_a}%s start", buff_name), true)
                 end
                 if buff_data.effect_check == 1 then
                     local my_handle = session.GetMyHandle()
@@ -20833,11 +20881,11 @@ function Muteki_handle_buff_end(notice_frame, buff_id)
     if notice then
         if buff_data.pt_chat == 1 then
             if not string.find(buff_cls.Name, "NoData") then
-                ui.Chat(string.format("/p %s end", buff_cls.Name))
+                Muteki_chat_later(string.format("/p %s end", buff_cls.Name), false)
             end
         end
         if buff_data.nico_chat == 1 then
-            NICO_CHAT(string.format("{@st55_a}%s end", buff_cls.Name))
+            Muteki_chat_later(string.format("{@st55_a}%s end", buff_cls.Name), true)
         end
         if buff_data.end_sound == 1 then
             imcSound.PlaySoundEvent("sys_transcend_cast")
