@@ -48,12 +48,13 @@
 -- 1.1.0 "Challenge Helper: new addon showing a challenge-mode HUD (stage, kill count, remaining time) plus the horizontal distance to the nearest live boss and to the exit portal, with a minimap marker on the boss. Portal coordinates come from the game's own minimap-mark calls, which are hooked so the original marker still draws. OCSL: the representative-class icon on the left of each character now actually follows the class picked in ILV - the lookup read this bundle's own data under author \"norisan\" while this fork is authored as \"yomae\", so it never resolved; the id is also converted back to a number (it is stored as a string) and a missing class falls back to a placeholder icon instead of a nil image"
 -- 1.1.1 "EP18.2 support. IP: the two new Uriel raids (False Radiance / Fallen Judgment) and the Sanctuary of Resonance are on the panel, challenge and singularity each move up one tier (Lv.520 dropped, Lv.540 / Lv.560 with a PT button), the Saule certificate shop joins the shortcut row, and the removed Ashaq dungeon no longer draws a dead row. The remaining-entry lookup no longer uses a hand-written dungeon id list - it reads UnitPerReset / CheckCountName off the dungeon class, so the new Lv.560 tiers report the right count instead of always 0 (which also made the panel keep spending tickets). ILV: the two new raids are listed and the settings version is bumped so existing saves get their checkboxes. AR: the Lv.560 emergency repair kit from the Saule shop replaces the Lv.550 one"
 -- 1.1.2 "Muteki: fixed a client crash. When a buff you had set to announce in party chat ended, the party message was sent from inside the engine BUFF_REMOVE dispatch, which killed the client with an access violation (confirmed from a crash dump; the player was in a party, so a missing party was not the cause). The message text is still built at that moment but the send itself is deferred by one tick, out of the buff dispatch. Applies to the party-chat and nico-chat notifications, on buff start and buff end"
+-- 1.1.3 "IP: the Lv.540 and Lv.560 challenge buttons no longer follow the same ticket order. Lv.540 is the old tier, so a ticket you already hold is spent first and a TOS coin ticket is only bought when you have none left; Lv.560 keeps buying while the shop allowance lasts and saves your permanent tickets. The shop-allowance check was also tier-blind - it looked at the Lv.540 shop and the PvP mine together, so a Lv.560 entry could be judged by the wrong counter. QSO: the two new Uriel raids swap your quickslot potions like every other raid did (both are Paramune, so the Paramune attack and defence potions are used) - their dungeon ids were simply missing from the raid table"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.1.2"
+local ver = "1.1.3"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -4421,10 +4422,32 @@ function Indun_panel_challenge_item_use(indun_panel, ctrl, mode, indun_type)
     end
 end
 
+-- 이 등급을 파는 상점에 구매 횟수가 남았는가.
+-- 🔴 예전에는 등급과 무관하게 320(540 상점)과 PVP_MINE_40(560 상점)을 같이 봤다.
+--    EP18.2 로 등급을 올리면서 이 두 줄을 놓쳤다
+-- which shop sells this tier, and whether any purchase allowance is left
+function Indun_panel_can_buy(indun_type)
+    if indun_type == 1004 then
+        return Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_320") >= 1
+    end
+    return Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_322") >= 1 or
+               Indun_panel_get_recipe_trade_count("PVP_MINE_40") >= 1
+end
+
 function Indun_panel_process_ticket(indun_type, mode, config)
     -- 파티 입장은 1007(Lv.560 자동매칭)뿐이다. 예전 1005(540 파티)는 indun.ies 에서 사라졌다
     local enter_mode = indun_type == 1007 and 2 or 1
-    if Indun_panel_use_prioritized_ticket(config.expiring, enter_mode, indun_type) then
+    -- 🔑 등급마다 순서가 다르다:
+    --   Lv.540 = 지난 던전이다 -> 가진 티켓을 먼저 쓰고 없을 때 산다
+    --   Lv.560 = 현역이다 -> 구매 횟수는 기간마다 초기화되니 살 수 있을 때 사고
+    --            무기한 티켓은 아껴 둔다(원래 전략)
+    -- the old tier spends what you own first; the current tier buys while it can
+    local use_owned_first = (indun_type == 1004)
+    if Indun_panel_use_prioritized_ticket(config.expiring, enter_mode, indun_type, use_owned_first) then
+        return
+    end
+    if use_owned_first and
+        Indun_panel_use_prioritized_ticket(config.non_expiring, enter_mode, indun_type, true) then
         return
     end
     -- 어느 상점이 그 등급을 파는가. 560 은 두 상점 다 판다 -> 누른 버튼(mode)이 정한다
@@ -4442,7 +4465,8 @@ function Indun_panel_process_ticket(indun_type, mode, config)
         Indun_panel_enter_reserve(enter_mode, indun_type)
         return
     end
-    if Indun_panel_use_prioritized_ticket(config.non_expiring, enter_mode, indun_type) then
+    if not use_owned_first and
+        Indun_panel_use_prioritized_ticket(config.non_expiring, enter_mode, indun_type, false) then
         return
     end
     if recipe_name == "PVP_MINE_40" then
@@ -4461,7 +4485,9 @@ function Indun_panel_process_ticket(indun_type, mode, config)
     end
 end
 
-function Indun_panel_use_prioritized_ticket(ticket_ids, enter_mode, indun_type)
+-- prefer_owned = true 면 가진 무기한 티켓을 그냥 쓴다(구매 여부를 보지 않는다).
+-- false 면 원래 전략대로 "살 수 있으면 사고 무기한은 아낀다"
+function Indun_panel_use_prioritized_ticket(ticket_ids, enter_mode, indun_type, prefer_owned)
     local candidate_tickets = {}
     local use_item = nil
     for _, classid in ipairs(ticket_ids) do
@@ -4476,13 +4502,11 @@ function Indun_panel_use_prioritized_ticket(ticket_ids, enter_mode, indun_type)
                         priority = (life_time and life_time > 0 and life_time < 86400) and 1 or 2
                     })
                 else
-                    if indun_type == 1001 then
+                    -- 여기는 무기한 티켓이다(남은 기간이 없다)
+                    if prefer_owned or indun_type == 1001 then
                         use_item = inv_item
-                    else
-                        if Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_320") < 1 and
-                            Indun_panel_get_recipe_trade_count("PVP_MINE_40") < 1 then
-                            use_item = inv_item
-                        end
+                    elseif not Indun_panel_can_buy(indun_type) then
+                        use_item = inv_item      -- 더 살 수 없으면 그때 쓴다
                     end
                 end
             else
@@ -23272,9 +23296,12 @@ end
 -- monster_kill_count ここまで
 
 -- quickslot_operate ここから
+-- indun_type -> 몬스터 종족. 종족은 monster.ies 의 RaceType 컬럼에서 확인할 것(추측 금지)
+-- 733/734 = 거짓된 광휘, 736/737 = 타락한 심판 (EP18.2, 둘 다 RaceType=Paramune)
+-- 파티(Hard)는 아직 indun.ies 에 행이 없다 — 오픈되면 그 ID 도 여기 넣을 것
 g.quickslot_operate_raid_list = {
     Paramune = {623, 667, 666, 665, 674, 673, 675, 680, 679, 681, 707, 708, 710, 711, 709, 712, 722, 723, 724, 725, 726,
-                727},
+                727, 733, 734, 736, 737},
     Klaida = {686, 685, 687, 716, 717, 718},
     Velnias = {689, 688, 690, 669, 635, 628, 696, 695, 697},
     Forester = {672, 671, 670},
