@@ -11,7 +11,7 @@
 --   ported from nexus vakarine_equip, with its unbounded retries, nondeterministic ordering,
 --   duplicate message registration and per-hit equipment scan all fixed
 local addonName = "auto_keeper"
-local version = "1.1.0"
+local version = "1.2.0"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -43,7 +43,8 @@ local AK_LANG = {
         tip_relic = "{ol}던전 입장창에서 성물 마력이 덜 찼으면 엑토나이트로 채웁니다{nl}도시와 성역은 게임 기본 자동충전이 이미 처리합니다",
         tip_repair = "{ol}내구도가 %d%% 미만인 장비를 수리 도구로 수리합니다",
         no_kit = "[Auto Keeper] 수리 도구가 없습니다.",
-        no_fix = "[Auto Keeper] 수리 도구로 고칠 수 없는 장비입니다(Lv.550 초과). 자동 수리를 멈춥니다.",
+        no_autobuy = "[Auto Keeper] 수리 도구가 모자라지만 자동구매가 꺼져 있어 사지 않았습니다.",
+        no_fix = "[Auto Keeper] 가진 수리 도구로는 고칠 수 없는 장비입니다(도구 상한 Lv.%d). 자동 수리를 멈춥니다.",
         no_pill = "[Auto Keeper] 쓸 수 있는 스태미나 알약이 없습니다(없거나·잠김·쿨다운).",
         no_ecto = "[Auto Keeper] 엑토나이트가 없어 성물 충전을 건너뜁니다.",
         relic_done = "[Auto Keeper] 성물 마력 충전 완료.",
@@ -98,7 +99,8 @@ local AK_LANG = {
         tip_relic = "{ol}ダンジョン入場画面でレリック魔力が満タンでなければエクトナイトで補充します{nl}街と聖域はゲーム標準の自動チャージが処理します",
         tip_repair = "{ol}耐久度が %d%% 未満の装備を修理道具で修理します",
         no_kit = "[Auto Keeper] 修理道具がありません。",
-        no_fix = "[Auto Keeper] 修理道具では直せない装備です(Lv.550 超)。自動修理を止めます。",
+        no_autobuy = "[Auto Keeper] 修理道具が足りませんが、自動購入がオフのため購入しません。",
+        no_fix = "[Auto Keeper] 手持ちの修理道具では直せない装備です(道具の上限 Lv.%d)。自動修理を止めます。",
         no_pill = "[Auto Keeper] 使用できるスタミナ丸薬がありません(未所持・ロック・クールダウン)。",
         no_ecto = "[Auto Keeper] エクトナイトがないためチャージをスキップします。",
         relic_done = "[Auto Keeper] レリック魔力チャージ完了。",
@@ -150,7 +152,8 @@ local AK_LANG = {
         tip_relic = "{ol}Tops relic power up with Ectonite at the dungeon entry window{nl}Cities and the Sanctuary are already covered by the built-in auto charge",
         tip_repair = "{ol}Repairs gear below %d%% durability with repair kits",
         no_kit = "[Auto Keeper] No repair kit.",
-        no_fix = "[Auto Keeper] This gear is above Lv.550 and the kit cannot repair it. Stopping.",
+        no_autobuy = "[Auto Keeper] Repair kits are low, but auto-buy is off so none were bought.",
+        no_fix = "[Auto Keeper] The kits you hold cannot repair this gear (kit cap Lv.%d). Stopping.",
         no_pill = "[Auto Keeper] No usable stamina pill (missing, locked or on cooldown).",
         no_ecto = "[Auto Keeper] No Ectonite, skipping the relic charge.",
         relic_done = "[Auto Keeper] Relic power charged.",
@@ -246,10 +249,15 @@ local AK_NOPILL_RETRY = 5.0
 local AK_ECTONITE = {"misc_Ectonite", "misc_Ectonite_Care"}
 local AK_RELIC_TX = "RELIC_CHARGE_RP"
 
--- 수리 도구: 아우스테야 증서 / repair kit: Austeja certificate
-local AK_REPAIR_ITEM_CLSID = 11201388
-local AK_REPAIR_SHOP_ITEM = "AustejaCertificate_14"    -- ItemTradeShop 항목 / shop entry
-local AK_REPAIR_SHOP_TYPE = "AustejaCertificate"
+-- 수리 도구 목록. **상한이 높은 것이 앞**이다.
+--   EP18.2 로 Lv.560 키트(사울레 인증서)가 나왔다. 상한(NumberArg2)이 560 이라 하위 호환이고,
+--   앞으로 사는 것은 항상 560 이면 된다. 다만 **가방에 옛 550 키트만 있을 수도** 있어서
+--   "쓰는 것" 과 "사는 것" 을 나눠 다룬다(2026-09-01 EP18.2 / 2026-09-04 제보로 확정).
+-- the 560 kit supersedes the 550 one; the list is a priority order
+local AK_REPAIR_KITS = {
+    {id = 11202105, cap = 560, shop = "SauleCertificate_15", type = "SauleCertificate"},
+    {id = 11201388, cap = 550, shop = "AustejaCertificate_14", type = "AustejaCertificate"},
+}
 local AK_REPAIR_SHOP_TX = "Certificate_SHOP"
 local AK_BUY_GAP = 30.0                                -- 자동 구매 최소 간격(초) / min gap between buys
 -- 증서 1장이 올려주는 내구도(내부 단위). item_EP13.ies 11201388 의 NumberArg1 = 1000 이고,
@@ -910,6 +918,14 @@ local function AK_potion_remove(frame, buff_ids)
     if #buff_ids == 0 or not AK_potion_hp_ok() then
         return
     end
+    -- 🔑 **바카리네 축복 5세트를 착용했을 때만 해제한다**(사용자 지시 2026-09-03).
+    -- 이 기능이 필요한 이유가 5세트의 회복 관련 옵션이라, 세트가 아닐 때 해제하면
+    -- 그냥 회복 버프를 버리는 셈이 된다.
+    -- 🔑 관문이 여기 하나인 이유: 버프 도착과 안전 타이머가 **둘 다 이 함수를 지난다**
+    -- both entry points funnel through here, so one gate covers them
+    if type(_G["AK_vk_is_set"]) ~= "function" or not AK_vk_is_set() then
+        return
+    end
     for _, buff_id in ipairs(buff_ids) do
         REMOVE_BUF(frame, nil, "AUTO_KEEPER", buff_id)
     end
@@ -1066,33 +1082,63 @@ end
 -- 상점 트랜잭션을 날렸다. 여기서는 count 가 0 이하면 아예 안 부른다
 -- the "keep N in stock" model was dropped at the user's request: it now buys only what this
 -- repair actually needs, with the count computed by the caller
-function AK_repair_buy(count)
+function AK_repair_buy(count, kind)
     if not g.settings or g.settings.repair_autobuy ~= 1 then
         return
     end
+    kind = kind or AK_REPAIR_KITS[1]
     if count == nil or count <= 0 then
         return
     end
-    -- 한 번에 살 수 있는 상한. 계산이 어긋나도 대량 구매로 번지지 않게 하는 안전장치다
-    -- a per-purchase cap, so a miscalculation cannot turn into a bulk buy
-    local cap = g.settings.repair_buy_qty or 50
-    if count > cap then
-        count = cap
+    -- 🔑 **설정값은 "한 번에 살 개수" 다**(상한이 아니다). 50 으로 두면 50 장을 산다 —
+    -- 자주 사러 가지 않으려고 넣는 값인데, 예전에는 상한으로만 써서 그때 필요한 3~4장만 샀다
+    -- (2026-09-02 사용자 지적)
+    -- the setting is how many to buy at once, not a ceiling
+    local qty = g.settings.repair_buy_qty or 50
+    if count < qty then
+        count = qty
+    end
+    -- 계산이 어긋나도 대량 구매로 번지지 않게 하는 마지막 안전선
+    if count > 999 then
+        count = 999
     end
     if AK_throttled("repair_buy", AK_BUY_GAP) then
         return
     end
-    local shop_cls = GetClass("ItemTradeShop", AK_REPAIR_SHOP_ITEM)
+    local shop_cls = GetClass("ItemTradeShop", kind.shop)
     if not shop_cls then
         return
     end
     session.ResetItemList()
     session.AddItemID(tostring(0), 1)
     local str_list = NewStringList()
-    str_list:Add(AK_REPAIR_SHOP_TYPE)
+    str_list:Add(kind.type)
     item.DialogTransaction(AK_REPAIR_SHOP_TX, session.GetItemIDList(),
         string.format("%s %s", tostring(shop_cls.ClassID), tostring(count)), str_list)
     CHAT_SYSTEM(string.format(AK_t("kit_bought"), count))
+end
+
+-- 가진 수리 도구 중 **상한이 need_lv 이상인** 것. 없으면 nil 과 함께 "사야 할 것" 을 돌려준다.
+-- 🔴 **키트는 자기 상한(cap) 이하 장비만 고친다**(item.ies NumberArg2).
+--    예전에는 상한을 보지 않고 가진 것을 그냥 집었다 → Lv.550 키트를 39개 갖고 있으면
+--    "부족하지 않다" 고 판단해 Lv.560 키트를 사지 않았고, 그 550 키트로 560 장비를 세 번
+--    시도하다 멈췄다(2026-09-04 제보, 로그로 확인)
+-- the kit only repairs gear up to its cap; owning lower-tier kits must not block the purchase
+local function AK_repair_kit(need_lv)
+    need_lv = need_lv or 0
+    local want = nil
+    for _, k in ipairs(AK_REPAIR_KITS) do
+        if k.cap >= need_lv then
+            if want == nil then
+                want = k                                 -- 상한을 넘는 것 중 첫 번째(=최신)
+            end
+            local inv = session.GetInvItemByType(k.id)
+            if inv ~= nil and (inv.count or 0) > 0 then
+                return inv, k
+            end
+        end
+    end
+    return nil, want or AK_REPAIR_KITS[1]
 end
 
 -- 착용 장비를 훑어 (가장 낮은 내구도 비율, 가장 낮은 내구도 절대값, 필요한 증서 장수) 를 낸다.
@@ -1106,6 +1152,7 @@ local function AK_repair_scan()
         return nil, nil, 0
     end
     local worst_ratio, worst_dur, worst_deficit = nil, nil, 0
+    local need_lv = 0                                    -- 수리 대상 중 가장 높은 UseLv
     for i = 0, equip_list:Count() - 1 do
         local equip_item = equip_list:GetEquipItemByIndex(i)
         local temp_obj = equip_item and equip_item:GetObject()
@@ -1122,41 +1169,68 @@ local function AK_repair_scan()
                     if deficit > worst_deficit then
                         worst_deficit = deficit
                     end
+                    -- 🔑 장비 레벨은 **UseLv** 다(item_Equip_*.ies). 여명 장비는 560 이라
+                    -- 550 키트로는 안 고쳐진다 — 이 값으로 쓸/살 키트를 고른다
+                    local lv = tonumber(TryGetProp(obj, "UseLv", 0)) or 0
+                    if lv > need_lv then
+                        need_lv = lv
+                    end
                 end
             end
         end
     end
-    return worst_ratio, worst_dur, math.ceil(worst_deficit / AK_KIT_HEAL)
+    return worst_ratio, worst_dur, math.ceil(worst_deficit / AK_KIT_HEAL), need_lv
 end
 
 local function AK_repair_try()
     if not AK_on("repair") or not g.ready then
         return
     end
-    local worst_ratio, worst_dur, need = AK_repair_scan()
+    local worst_ratio, worst_dur, need, need_lv = AK_repair_scan()
     if worst_ratio == nil or need <= 0 then
-        -- 기준선 위로 올라왔다: 알림·정체 판정 상태를 푼다
-        -- back above the line: clear the notice and stall bookkeeping
-        g.repair_warned = false
+        -- 기준선 위로 올라왔다: 안내 스로틀과 정체 판정 상태를 푼다
+        -- back above the line: clear the notice throttles and stall bookkeeping
+        if type(g.last_use) == "table" then
+            g.last_use["repair_nobuy"] = nil
+            g.last_use["repair_nokit"] = nil
+            g.last_use["repair_nofix"] = nil
+        end
         g.repair_stall = 0
         g.repair_used_at = nil
         return
     end
 
-    local kit = session.GetInvItemByType(AK_REPAIR_ITEM_CLSID)
+    local kit, kind = AK_repair_kit(need_lv)
     local have = (kit and kit.count) or 0
+    -- 쓰는 키트가 바뀌면 정체 판정을 새로 시작한다(옛 키트로 실패한 기록을 물려받지 않는다)
+    if g.repair_kind ~= kind.id then
+        g.repair_kind = kind.id
+        g.repair_stall = 0
+    end
     if have < need then
-        AK_repair_buy(need - have)
+        -- 🔴 **자동구매는 수리와 별개 설정이고 기본값이 꺼짐이다.** 예전에는 꺼져 있으면
+        -- AK_repair_buy 첫 줄에서 조용히 끝나서 "왜 안 사지" 를 알 방법이 없었다 → 이유를 말한다
+        -- the auto-buy switch is separate and defaults to off; say so instead of going silent
+        if not g.settings or g.settings.repair_autobuy ~= 1 then
+            if not AK_throttled("repair_nobuy", 60.0) then
+                CHAT_SYSTEM(AK_t("no_autobuy"))
+            end
+        else
+            -- 모자라면 **항상 최신 키트**를 산다. 가진 것이 옛 키트라도 보충은 최신으로 한다
+            AK_repair_buy(need - have, (kit == nil) and kind or AK_REPAIR_KITS[1])
+        end
     end
     if not kit or not AK_item_usable(kit) then
-        if have <= 0 and not g.repair_warned then
-            g.repair_warned = true
+        -- ⚠️ 예전에는 g.repair_warned 로 **한 번만** 알리고 그 뒤 영영 침묵했다(모든 장비가
+        -- 기준선 위로 올라가야 풀렸다) → "메시지가 아예 없다" 는 상황이 생겼다. 스로틀로 바꾼다
+        -- was a latch that went silent for the rest of the session; now a 60s throttle
+        if have <= 0 and not AK_throttled("repair_nokit", 60.0) then
             CHAT_SYSTEM(AK_t("no_kit"))
         end
         return
     end
 
-    -- ⚠️ 증서는 Lv.550 이하 장비만 고친다(item.ies NumberArg2). 그보다 높은 장비가 닳아 있으면
+    -- ⚠️ 증서는 **자기 상한(cap) 이하** 장비만 고친다(item.ies NumberArg2). 그보다 높은 장비가 닳아 있으면
     -- 아무리 써도 내구도가 안 오르는데, 타이머는 5초마다 다시 시도한다 = 증서와 돈을 계속
     -- 태운다. 써 본 뒤 값이 그대로면 세 번까지만 시도하고 멈춘다
     -- ⚠️ the kit only repairs gear up to Lv.550. above that, durability never moves, and the 5s
@@ -1172,9 +1246,8 @@ local function AK_repair_try()
         g.repair_used_at = nil
     end
     if (g.repair_stall or 0) >= 3 then
-        if not g.repair_warned then
-            g.repair_warned = true
-            CHAT_SYSTEM(AK_t("no_fix"))
+        if not AK_throttled("repair_nofix", 60.0) then
+            CHAT_SYSTEM(string.format(AK_t("no_fix"), kind.cap))
         end
         return
     end
@@ -2660,7 +2733,8 @@ end
 -- diagnostic: kit count plus the most worn equipment as percentages. a repair that never fires
 -- is almost always one of: no kit, kit on cooldown, or nothing actually below the line
 function AK_dump_dur()
-    local kit = session.GetInvItemByType(AK_REPAIR_ITEM_CLSID)
+    local _, _, _, diag_lv = AK_repair_scan()
+    local kit, kind = AK_repair_kit(diag_lv)
     local have = (kit and kit.count) or 0
     local cool = 0
     if kit then
@@ -2687,8 +2761,10 @@ function AK_dump_dur()
         table.insert(out, string.format("%s %d%%", rows[i].name, math.floor(rows[i].pct)))
     end
     local _, _, need = AK_repair_scan()
-    CHAT_SYSTEM(string.format("[Auto Keeper] kit %d (cool %s) | need %d | %d%% 미만이면 수리 | %s",
-        have, tostring(cool), need, math.floor(AK_DUR_RATIO * 100),
+    -- 어느 키트를 쓰는지·필요 레벨이 몇인지까지 찍는다(2026-09-04 제보를 이걸로 잡았다)
+    CHAT_SYSTEM(string.format(
+        "[Auto Keeper] kit %d (Lv.%d, cool %s) | need %d장 | 필요레벨 %d | %d%% 미만이면 수리 | %s",
+        have, kind.cap, tostring(cool), need, diag_lv, math.floor(AK_DUR_RATIO * 100),
         #out > 0 and table.concat(out, ", ") or "-"))
 end
 
