@@ -49,12 +49,13 @@
 -- 1.1.1 "EP18.2 support. IP: the two new Uriel raids (False Radiance / Fallen Judgment) and the Sanctuary of Resonance are on the panel, challenge and singularity each move up one tier (Lv.520 dropped, Lv.540 / Lv.560 with a PT button), the Saule certificate shop joins the shortcut row, and the removed Ashaq dungeon no longer draws a dead row. The remaining-entry lookup no longer uses a hand-written dungeon id list - it reads UnitPerReset / CheckCountName off the dungeon class, so the new Lv.560 tiers report the right count instead of always 0 (which also made the panel keep spending tickets). ILV: the two new raids are listed and the settings version is bumped so existing saves get their checkboxes. AR: the Lv.560 emergency repair kit from the Saule shop replaces the Lv.550 one"
 -- 1.1.2 "Muteki: fixed a client crash. When a buff you had set to announce in party chat ended, the party message was sent from inside the engine BUFF_REMOVE dispatch, which killed the client with an access violation (confirmed from a crash dump; the player was in a party, so a missing party was not the cause). The message text is still built at that moment but the send itself is deferred by one tick, out of the buff dispatch. Applies to the party-chat and nico-chat notifications, on buff start and buff end"
 -- 1.1.3 "IP: the Lv.540 and Lv.560 challenge buttons no longer follow the same ticket order. Lv.540 is the old tier, so a ticket you already hold is spent first and a TOS coin ticket is only bought when you have none left; Lv.560 keeps buying while the shop allowance lasts and saves your permanent tickets. The shop-allowance check was also tier-blind - it looked at the Lv.540 shop and the PvP mine together, so a Lv.560 entry could be judged by the wrong counter. QSO: the two new Uriel raids swap your quickslot potions like every other raid did (both are Paramune, so the Paramune attack and defence potions are used) - their dungeon ids were simply missing from the raid table"
+-- 1.1.4 "IP: the challenge and singularity entry tickets now follow the order they are written in. A permanent untradeable ticket is spent before buying one, and a tradeable one is kept for last - previously the loop overwrote its pick so the LAST id in the list won, which made Lv.540 and Lv.560 behave in opposite ways, and the time-limited list was sorted with table.sort on a key that ties for almost every ticket (a 1-day pass has exactly 86400 left, so it never counted as under a day). The ticket lists are now split into expiring / no_trade / tradable and the sort breaks ties by list position"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.1.3"
+local ver = "1.1.4"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -4277,6 +4278,13 @@ function Indun_panel_overbuy_amount(recipe_name)
     return 1050 + (current_overbuy_count * 50)
 end
 
+-- 세 목록(기간제 / 거래불가 / 거래가능)의 보유 수량 합
+function Indun_panel_ticket_count(config)
+    return Indun_panel_get_invitem_count(config.expiring) +
+               Indun_panel_get_invitem_count(config.no_trade) +
+               Indun_panel_get_invitem_count(config.tradable)
+end
+
 function Indun_panel_get_invitem_count(tbl)
     local count = 0
     local inv_item_list = session.GetInvItemList()
@@ -4305,14 +4313,20 @@ end
 -- 상점이 파는 등급도 패치로 같이 올라갔다: 예전 520 자리의 EVENT_TOS_WHOLE_SHOP_315 는
 -- 이제 챌린지 입장권이 아니라 레이드 입장권을 판다 -> 520 을 남길 이유가 없다.
 -- 상점판은 아이템 이름 규칙이 다르다(Event_560ChallengeModeReset_limit_renew = 10820054)
+-- 🔑 쓰는 순서가 곧 목록 순서다. 무기한 티켓을 하나로 묶어 두면 어느 쪽이 먼저 쓰일지
+-- 코드가 정하게 되고 실제로 뒤죽박죽이었다 -> 거래불가/거래가능을 따로 둔다.
+--   expiring = 기간제(짧은 것부터) / no_trade = 무기한 거래불가(D) / tradable = 무기한 거래가능(A)
+-- the list order IS the use order; never merge no-trade and tradable
 local CHALLENGE_CONFIG = {
     LOW = { -- Lv.540
-        expiring = {11201299, 11201300, 10820052},
-        non_expiring = {11201298, 11201297}
+        expiring = {11201299, 11201300, 10820052},   -- 1일 / 7일 / TOS 14일
+        no_trade = {11201298},                       -- (D) ChallengeModeReset_540_NoTrade
+        tradable = {11201297}                        -- (A) ChallengeModeReset_540
     },
     HIGH = { -- Lv.560 (11202128~11202131 + TOS 코인판 10820054)
         expiring = {11202130, 11202131, 10820054},
-        non_expiring = {11202128, 11202129}
+        no_trade = {11202129},                       -- (D) ChallengeModeReset_560_NoTrade
+        tradable = {11202128}                        -- (A) ChallengeModeReset_560
     }
 }
 function Indun_panel_challenge_frame(indun_panel, key, sub_key, indun_type, y, x)
@@ -4331,8 +4345,7 @@ function Indun_panel_challenge_frame(indun_panel, key, sub_key, indun_type, y, x
     AUTO_CAST(buyuse_low)
     local text_low = string.format("{ol}%s{#EE7800}USEor{img %s %d %d}{#FFFFFF}%s", ip_f(16), "icon_item_Tos_Event_Coin",
         ip_s(15), ip_s(15), Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_320") or 0)
-    local count = Indun_panel_get_invitem_count(CHALLENGE_CONFIG.LOW.expiring)
-    count = count + Indun_panel_get_invitem_count(CHALLENGE_CONFIG.LOW.non_expiring)
+    local count = Indun_panel_ticket_count(CHALLENGE_CONFIG.LOW)
     local icon_text = ""
     local item_cls = GetClassByType('Item', CHALLENGE_CONFIG.LOW.expiring[1])
     if item_cls then
@@ -4367,8 +4380,7 @@ function Indun_panel_challenge_frame(indun_panel, key, sub_key, indun_type, y, x
     local buyuse_high_tos = indun_panel:CreateOrGetControl('button', "buyuse_high_tos", x + ip_s(340), y, ip_s(100),
         ip_s(30))
     AUTO_CAST(buyuse_high_tos)
-    local count = Indun_panel_get_invitem_count(CHALLENGE_CONFIG.HIGH.expiring)
-    count = count + Indun_panel_get_invitem_count(CHALLENGE_CONFIG.HIGH.non_expiring)
+    local count = Indun_panel_ticket_count(CHALLENGE_CONFIG.HIGH)
     local icon_text_high = ""
     local item_cls = GetClassByType('Item', CHALLENGE_CONFIG.HIGH.expiring[1])
     if item_cls then
@@ -4422,18 +4434,6 @@ function Indun_panel_challenge_item_use(indun_panel, ctrl, mode, indun_type)
     end
 end
 
--- 이 등급을 파는 상점에 구매 횟수가 남았는가.
--- 🔴 예전에는 등급과 무관하게 320(540 상점)과 PVP_MINE_40(560 상점)을 같이 봤다.
---    EP18.2 로 등급을 올리면서 이 두 줄을 놓쳤다
--- which shop sells this tier, and whether any purchase allowance is left
-function Indun_panel_can_buy(indun_type)
-    if indun_type == 1004 then
-        return Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_320") >= 1
-    end
-    return Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_322") >= 1 or
-               Indun_panel_get_recipe_trade_count("PVP_MINE_40") >= 1
-end
-
 function Indun_panel_process_ticket(indun_type, mode, config)
     -- 파티 입장은 1007(Lv.560 자동매칭)뿐이다. 예전 1005(540 파티)는 indun.ies 에서 사라졌다
     local enter_mode = indun_type == 1007 and 2 or 1
@@ -4443,11 +4443,17 @@ function Indun_panel_process_ticket(indun_type, mode, config)
     --            무기한 티켓은 아껴 둔다(원래 전략)
     -- the old tier spends what you own first; the current tier buys while it can
     local use_owned_first = (indun_type == 1004)
-    if Indun_panel_use_prioritized_ticket(config.expiring, enter_mode, indun_type, use_owned_first) then
+    -- (1) 기간제부터. 놔두면 사라진다
+    if Indun_panel_use_prioritized_ticket(config.expiring, enter_mode, indun_type) then
         return
     end
+    -- (2) 거래불가 무기한. 팔 수 없으니 아껴 봐야 소용없다 -> 구매보다 먼저 쓴다
+    if Indun_panel_use_prioritized_ticket(config.no_trade, enter_mode, indun_type) then
+        return
+    end
+    -- (3) Lv.540 은 지난 등급이라 거래 가능한 것까지 다 쓰고 나서 산다
     if use_owned_first and
-        Indun_panel_use_prioritized_ticket(config.non_expiring, enter_mode, indun_type, true) then
+        Indun_panel_use_prioritized_ticket(config.tradable, enter_mode, indun_type) then
         return
     end
     -- 어느 상점이 그 등급을 파는가. 560 은 두 상점 다 판다 -> 누른 버튼(mode)이 정한다
@@ -4465,8 +4471,9 @@ function Indun_panel_process_ticket(indun_type, mode, config)
         Indun_panel_enter_reserve(enter_mode, indun_type)
         return
     end
+    -- (4) Lv.560 은 못 샀을 때만 거래 가능한 무기한을 꺼낸다
     if not use_owned_first and
-        Indun_panel_use_prioritized_ticket(config.non_expiring, enter_mode, indun_type, false) then
+        Indun_panel_use_prioritized_ticket(config.tradable, enter_mode, indun_type) then
         return
     end
     if recipe_name == "PVP_MINE_40" then
@@ -4485,47 +4492,42 @@ function Indun_panel_process_ticket(indun_type, mode, config)
     end
 end
 
--- prefer_owned = true 면 가진 무기한 티켓을 그냥 쓴다(구매 여부를 보지 않는다).
--- false 면 원래 전략대로 "살 수 있으면 사고 무기한은 아낀다"
-function Indun_panel_use_prioritized_ticket(ticket_ids, enter_mode, indun_type, prefer_owned)
+-- 이 목록에서 쓸 수 있는 것 하나를 골라 쓴다. 무엇을 먼저 볼지는 부르는 쪽이 정한다.
+-- 🔴 예전에는 무기한 티켓을 고를 때 루프가 use_item 을 덮어써서 목록의 마지막 것이 이겼고,
+--    기간제는 table.sort 동점(안정 정렬이 아니다)이라 결과가 아예 불확정이었다
+--    -> 거래불가를 앞에 적어 놔도 거래가능이 쓰이는 일이 생겼다.
+-- 순위: (1) 남은 기간이 하루 미만  (2) 그 외 — 동점이면 목록에 적힌 순서
+-- ties break by list position, so the caller's order is always honoured
+function Indun_panel_use_prioritized_ticket(ticket_ids, enter_mode, indun_type)
     local candidate_tickets = {}
-    local use_item = nil
-    for _, classid in ipairs(ticket_ids) do
+    for order, classid in ipairs(ticket_ids) do
         local inv_item = session.GetInvItemByType(classid)
         if inv_item then
             if not inv_item.isLockState then
                 local item_obj = GetIES(inv_item:GetObject())
                 local life_time = tonumber(GET_REMAIN_ITEM_LIFE_TIME(item_obj)) or 0
-                if life_time > 0 then
-                    table.insert(candidate_tickets, {
-                        use_item = inv_item,
-                        priority = (life_time and life_time > 0 and life_time < 86400) and 1 or 2
-                    })
-                else
-                    -- 여기는 무기한 티켓이다(남은 기간이 없다)
-                    if prefer_owned or indun_type == 1001 then
-                        use_item = inv_item
-                    elseif not Indun_panel_can_buy(indun_type) then
-                        use_item = inv_item      -- 더 살 수 없으면 그때 쓴다
-                    end
-                end
+                table.insert(candidate_tickets, {
+                    use_item = inv_item,
+                    priority = (life_time > 0 and life_time < 86400) and 1 or 2,
+                    order = order
+                })
             else
-                ui.SysMsg(ClMsg("MaterialItemIsLock") .. " (" .. use_item.Name .. ")")
+                ui.SysMsg(ClMsg("MaterialItemIsLock") .. " (" .. inv_item.Name .. ")")
             end
         end
     end
-    if #candidate_tickets > 0 then
-        table.sort(candidate_tickets, function(a, b)
+    if #candidate_tickets == 0 then
+        return false
+    end
+    table.sort(candidate_tickets, function(a, b)
+        if a.priority ~= b.priority then
             return a.priority < b.priority
-        end)
-        use_item = candidate_tickets[1].use_item
-    end
-    if use_item then
-        INV_ICON_USE(use_item)
-        Indun_panel_enter_reserve(enter_mode, indun_type)
-        return true
-    end
-    return false
+        end
+        return a.order < b.order
+    end)
+    INV_ICON_USE(candidate_tickets[1].use_item)
+    Indun_panel_enter_reserve(enter_mode, indun_type)
+    return true
 end
 
 function Indun_panel_enter_reserve(index, indun_type)
@@ -4552,11 +4554,13 @@ end
 local SINGULARITY_CONFIG = {
     [2001] = { -- Lv.540
         expiring = {11201303, 11201304, 10820051},
-        non_expiring = {11201302, 11201301}
+        no_trade = {11201302},                       -- ChallengeExpertModeCountUp_540_NoTrade
+        tradable = {11201301}                        -- ChallengeExpertModeCountUp_540
     },
     [2003] = { -- Lv.560 (11202138~11202141 + TOS 코인판 10820053)
         expiring = {11202140, 11202141, 10820053},
-        non_expiring = {11202138, 11202139}
+        no_trade = {11202139},                       -- ChallengeExpertModeCountUp_560_NoTrade
+        tradable = {11202138}                        -- ChallengeExpertModeCountUp_560
     }
 }
 function Indun_panel_singularity_frame(indun_panel, key, sub_key, indun_type, y, x)
@@ -4574,8 +4578,7 @@ function Indun_panel_singularity_frame(indun_panel, key, sub_key, indun_type, y,
     AUTO_CAST(ticket_low)
     local text_low = string.format("{ol}%s{#EE7800}USEor{img %s %d %d}{#FFFFFF}%s", ip_f(16), "icon_item_Tos_Event_Coin",
         ip_s(15), ip_s(15), Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_319") or 0)
-    local count = Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2001].expiring)
-    count = count + Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2001].non_expiring)
+    local count = Indun_panel_ticket_count(SINGULARITY_CONFIG[2001])
     local icon_text = ""
     local item_cls = GetClassByType('Item', SINGULARITY_CONFIG[2001].expiring[1])
     if item_cls then
@@ -4606,8 +4609,7 @@ function Indun_panel_singularity_frame(indun_panel, key, sub_key, indun_type, y,
     local text_high_tos = string.format("{ol}%s{#EE7800}USEor{img %s %d %d}{#FFFFFF}%s",
         ip_f(16), "icon_item_Tos_Event_Coin", ip_s(15), ip_s(15),
         Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_321") or 0)
-    local count = Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2003].expiring)
-    count = count + Indun_panel_get_invitem_count(SINGULARITY_CONFIG[2003].non_expiring)
+    local count = Indun_panel_ticket_count(SINGULARITY_CONFIG[2003])
     local icon_text_high = ""
     local item_cls = GetClassByType('Item', SINGULARITY_CONFIG[2003].expiring[1])
     if item_cls then
@@ -4659,6 +4661,10 @@ function Indun_panel_item_use_sin(frame, ctrl, mode, indun_type)
     if Indun_panel_try_use_ticket_list(config.expiring, indun_type) then
         return
     end
+    -- 거래불가 무기한은 팔 수 없으니 구매보다 먼저 쓴다
+    if Indun_panel_try_use_ticket_list(config.no_trade, indun_type) then
+        return
+    end
     -- 540(낮은 칸) 버튼은 mode 문자열을 넘기지 않는다(원본 그대로) -> 그 경우도 TOS 로 본다
     if mode == "tos" or indun_type == 2001 then
         local recipe = (indun_type == 2001) and "EVENT_TOS_WHOLE_SHOP_319" or "EVENT_TOS_WHOLE_SHOP_321"
@@ -4679,23 +4685,25 @@ function Indun_panel_item_use_sin(frame, ctrl, mode, indun_type)
             return
         end
     end
-    if Indun_panel_try_use_ticket_list(config.non_expiring, indun_type) then
+    -- 거래 가능한 무기한은 마지막에(값이 나가는 물건이라 아낀다)
+    if Indun_panel_try_use_ticket_list(config.tradable, indun_type) then
         return
     end
 end
 
 function Indun_panel_try_use_ticket_list(ticket_ids, indun_type)
     local candidate_tickets = {}
-    for _, classid in ipairs(ticket_ids) do
+    -- 🔴 동점일 때 목록 순서를 지키려면 order 가 필요하다(table.sort 는 안정 정렬이 아니다)
+    for order, classid in ipairs(ticket_ids) do
         local inv_item = session.GetInvItemByType(classid)
         if inv_item then
             if not inv_item.isLockState then
                 local item_obj = GetIES(inv_item:GetObject())
                 local life_time = tonumber(GET_REMAIN_ITEM_LIFE_TIME(item_obj)) or 0
-                local priority = (life_time > 0 and life_time < 86400) and 1 or 2
                 table.insert(candidate_tickets, {
                     use_item = inv_item,
-                    priority = priority
+                    priority = (life_time > 0 and life_time < 86400) and 1 or 2,
+                    order = order
                 })
             else
                 ui.SysMsg(ClMsg("MaterialItemIsLock") .. " (" .. inv_item.Name .. ")")
@@ -4704,10 +4712,12 @@ function Indun_panel_try_use_ticket_list(ticket_ids, indun_type)
     end
     if #candidate_tickets > 0 then
         table.sort(candidate_tickets, function(a, b)
-            return a.priority < b.priority
+            if a.priority ~= b.priority then
+                return a.priority < b.priority
+            end
+            return a.order < b.order
         end)
-        local best_ticket = candidate_tickets[1].use_item
-        Indun_panel_item_use_and_run(best_ticket, indun_type)
+        Indun_panel_item_use_and_run(candidate_tickets[1].use_item, indun_type)
         return true
     end
     return false
