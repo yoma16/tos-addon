@@ -50,12 +50,13 @@
 -- 1.1.2 "Muteki: fixed a client crash. When a buff you had set to announce in party chat ended, the party message was sent from inside the engine BUFF_REMOVE dispatch, which killed the client with an access violation (confirmed from a crash dump; the player was in a party, so a missing party was not the cause). The message text is still built at that moment but the send itself is deferred by one tick, out of the buff dispatch. Applies to the party-chat and nico-chat notifications, on buff start and buff end"
 -- 1.1.3 "IP: the Lv.540 and Lv.560 challenge buttons no longer follow the same ticket order. Lv.540 is the old tier, so a ticket you already hold is spent first and a TOS coin ticket is only bought when you have none left; Lv.560 keeps buying while the shop allowance lasts and saves your permanent tickets. The shop-allowance check was also tier-blind - it looked at the Lv.540 shop and the PvP mine together, so a Lv.560 entry could be judged by the wrong counter. QSO: the two new Uriel raids swap your quickslot potions like every other raid did (both are Paramune, so the Paramune attack and defence potions are used) - their dungeon ids were simply missing from the raid table"
 -- 1.1.4 "IP: the challenge and singularity entry tickets now follow the order they are written in. A permanent untradeable ticket is spent before buying one, and a tradeable one is kept for last - previously the loop overwrote its pick so the LAST id in the list won, which made Lv.540 and Lv.560 behave in opposite ways, and the time-limited list was sorted with table.sort on a key that ties for almost every ticket (a 1-day pass has exactly 86400 left, so it never counted as under a day). The ticket lists are now split into expiring / no_trade / tradable and the sort breaks ties by list position"
+-- 1.1.5 "Challenge Helper: the escape-portal and boss-appeared notices no longer flood the chat on a normal field map. A field challenge broadcasts the same progress message and minimap-mark updates as an instanced one, and the game sends them every second, so the notices fired again and again: the minimap update re-arms the portal notice whenever the mark goes away and comes back, and every SHOW / GAUGERESET re-armed the boss notice even when the stage had not changed. Notices are now limited to an actual challenge instance, the same line cannot repeat within 60 seconds, and the boss notice is re-armed only when the stage really changes. The HUD itself is unchanged"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.1.4"
+local ver = "1.1.5"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -29691,6 +29692,16 @@ function challenge_helper_on_init()
     end
 end
 
+-- 🔴 **필드 챌린지도 같은 신호를 쏜다.** 일반 필드에서 필드 챌린지가 열리면 게임이
+--    UI_CHALLENGE_MODE_TOTAL_KILL_COUNT 와 미니맵 마커 갱신을 **매초** 보내는데,
+--    예전 알림은 맵을 확인하지 않아 "탈출 포탈 생성" / "보스 등장" 이 끝없이 떴다
+--    (2026-09-06 사용자 제보). 알림은 **인스턴스 챌린지 안에서만** 의미가 있다.
+-- 🔑 맵 판정이 틀릴 때를 대비해 **같은 문구 재알림 금지**도 함께 건다 —
+--    둘 중 하나만으로는 또 도배될 여지가 남는다
+-- field challenges emit the same signals every second; only notify inside the instance,
+-- and never repeat the same line within the cooldown
+local CH_NOTIFY_COOL = 60
+
 function Challenge_helper_notify(text)
     if g.settings.challenge_helper.use == 0 then
         return
@@ -29698,6 +29709,16 @@ function Challenge_helper_notify(text)
     if g.challenge_helper_settings.notify == 0 then
         return
     end
+    if not Challenge_helper_is_challenge_map() then
+        return
+    end
+    local now_t = imcTime.GetAppTime()
+    g.ch_notify_at = g.ch_notify_at or {}
+    local last = g.ch_notify_at[text]
+    if type(last) == "number" and now_t - last < CH_NOTIFY_COOL then
+        return
+    end
+    g.ch_notify_at[text] = now_t
     ui.SysMsg(text)
 end
 
@@ -29770,10 +29791,17 @@ function Challenge_helper_KILL_COUNT(frame, msg, str, arg)
     -- the message itself proves a challenge is running; never re-ask the map check here
     if head == "SHOW" or head == "GAUGERESET" then
         st.active = true
-        st.stage = tonumber(list[2]) or st.stage
+        local new_stage = tonumber(list[2]) or st.stage
+        -- ⚠️ 예전에는 여기서 무조건 boss_notified 를 풀었다. 필드 챌린지는 이 메시지가
+        --    파도마다 오므로 **단계가 그대로인데도** 보스 알림이 계속 다시 열렸다.
+        --    단계가 진짜 바뀔 때만 연다
+        -- only re-arm the boss notice when the stage actually changed
+        if new_stage ~= st.stage then
+            st.boss_notified = false
+        end
+        st.stage = new_stage
         st.kill = 0
         st.target = 0
-        st.boss_notified = false
         Challenge_helper_frame_init(true)
     elseif head == "START_CHALLENGE_TIMER" then
         st.active = true
