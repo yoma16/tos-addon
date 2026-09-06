@@ -51,12 +51,13 @@
 -- 1.1.3 "IP: the Lv.540 and Lv.560 challenge buttons no longer follow the same ticket order. Lv.540 is the old tier, so a ticket you already hold is spent first and a TOS coin ticket is only bought when you have none left; Lv.560 keeps buying while the shop allowance lasts and saves your permanent tickets. The shop-allowance check was also tier-blind - it looked at the Lv.540 shop and the PvP mine together, so a Lv.560 entry could be judged by the wrong counter. QSO: the two new Uriel raids swap your quickslot potions like every other raid did (both are Paramune, so the Paramune attack and defence potions are used) - their dungeon ids were simply missing from the raid table"
 -- 1.1.4 "IP: the challenge and singularity entry tickets now follow the order they are written in. A permanent untradeable ticket is spent before buying one, and a tradeable one is kept for last - previously the loop overwrote its pick so the LAST id in the list won, which made Lv.540 and Lv.560 behave in opposite ways, and the time-limited list was sorted with table.sort on a key that ties for almost every ticket (a 1-day pass has exactly 86400 left, so it never counted as under a day). The ticket lists are now split into expiring / no_trade / tradable and the sort breaks ties by list position"
 -- 1.1.5 "Challenge Helper: the escape-portal and boss-appeared notices no longer flood the chat on a normal field map. A field challenge broadcasts the same progress message and minimap-mark updates as an instanced one, and the game sends them every second, so the notices fired again and again: the minimap update re-arms the portal notice whenever the mark goes away and comes back, and every SHOW / GAUGERESET re-armed the boss notice even when the stage had not changed. Notices are now limited to an actual challenge instance, the same line cannot repeat within 60 seconds, and the boss notice is re-armed only when the stage really changes. The HUD itself is unchanged"
+-- 1.1.6 "QSO: the raid potion swap now works on the FIRST entry in joypad mode. Three separate defects all came from the same habit of hanging work off the keyboard quickslot bar, which is always hidden in joypad mode, and an update script only ticks while its frame is shown. The table of swappable potion ids was built only inside the bar update script, so the first swap died with an index-nil error and only worked from the second attempt, once the failed attempt had left the bar shown; the map-change swap was scheduled as an update script on that same hidden bar and never fired at all; and the writes ran in the same frame as ShowWindow(1), which does not take effect until the next frame, so the Item branch of SET_QUICK_SLOT silently wrote nothing. The potion table is now built where it is needed, both delayed calls use ReserveScript, and the writes happen one tick after the bar is shown. The bar also no longer flashes: its opacity is restored after the hide has actually applied instead of in the same frame"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.1.5"
+local ver = "1.1.6"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -23650,16 +23651,34 @@ function Quickslot_operate_build_slotset_menu(context, mode)
     end
 end
 
-function Quickslot_operate_set_script(quickslotnexpbar)
+-- Collect the item ids we are allowed to swap.
+-- This table used to be built ONLY inside Quickslot_operate_set_script, which runs as
+-- quickslotnexpbar:RunUpdateScript("Quickslot_operate_set_script", 2.0). An update script only
+-- ticks while its frame is shown, and in joypad mode the keyboard bar is always hidden, so the
+-- table was never built and the first swap died with
+--   attempt to index a nil value (field 'qso_potion_map')
+-- It appeared to work from the second try only because the first attempt had left the bar shown.
+-- Building this table has nothing to do with the UI, so it no longer hangs off a frame.
+-- 물약 표를 만드는 일은 UI 와 무관하다 -> 숨겨진 프레임의 업데이트 스크립트에 매달지 않는다
+function Quickslot_operate_build_potion_map()
+    if type(g.quickslot_operate_atk_list) ~= "table" or
+        type(g.quickslot_operate_def_list) ~= "table" then
+        return false
+    end
     g.qso_potion_map = {}
-    for race, pots in pairs(g.quickslot_operate_atk_list) do
+    for _, pots in pairs(g.quickslot_operate_atk_list) do
         for _, pot_id in ipairs(pots) do
             g.qso_potion_map[pot_id] = true
         end
     end
-    for race, pot_id in pairs(g.quickslot_operate_def_list) do
+    for _, pot_id in pairs(g.quickslot_operate_def_list) do
         g.qso_potion_map[pot_id] = true
     end
+    return true
+end
+
+function Quickslot_operate_set_script(quickslotnexpbar)
+    Quickslot_operate_build_potion_map()
     local is_use = quickslotnexpbar:GetUserIValue("USE")
     for i = 1, MAX_QUICKSLOT_CNT do
         local slot = GET_CHILD_RECURSIVELY(quickslotnexpbar, "slot" .. i)
@@ -23723,8 +23742,32 @@ function Quickslot_operate_set_potion(parent, slot, str, pot_id)
     end
 end
 
-function Quickslot_operate_check_all_slots(race, down_potion_id, atk_id, def_id)
+-- Runs one tick after the bar was shown, so the Item writes land.
+function Quickslot_operate_write_slots_now()
+    local p = g.qso_pending
+    if type(p) ~= "table" then
+        return
+    end
+    g.qso_pending = nil
+    Quickslot_operate_check_all_slots(p.race, p.down, p.atk, p.def, true)
+end
+
+function Quickslot_operate_check_all_slots(race, down_potion_id, atk_id, def_id, deferred)
     local quickslotnexpbar = ui.GetFrame("quickslotnexpbar")
+    -- In joypad mode the bar starts hidden, and ShowWindow(1) does NOT take effect within this
+    -- frame (verified: IsVisible() still reported the old value right after ShowWindow). The Item
+    -- branch of SET_QUICK_SLOT only writes while the frame is really shown, so writing here fails
+    -- silently. Show the bar now and do the writes on the next tick.
+    -- Bonus: the hook and the message handler both call this in the same frame; overwriting
+    -- g.qso_pending makes the writes run once instead of twice.
+    -- 조이패드 모드: 바를 띄운 **다음 틱**에 기록한다(ShowWindow 는 이 프레임에 반영되지 않는다)
+    if IsJoyStickMode() == 1 and deferred ~= true then
+        quickslotnexpbar:SetAlpha(0)
+        quickslotnexpbar:ShowWindow(1)
+        g.qso_pending = {race = race, down = down_potion_id, atk = atk_id, def = def_id}
+        ReserveScript("Quickslot_operate_write_slots_now()", 0.3)
+        return
+    end
     -- SET_QUICK_SLOT's Item branch only writes while the target frame is shown -- verified
     -- in-game: without ShowWindow(1) the potion never changes. Skill writes (cupole_manager)
     -- do work on a hidden frame, so this is an Item-only constraint.
@@ -23738,6 +23781,13 @@ function Quickslot_operate_check_all_slots(race, down_potion_id, atk_id, def_id)
     if joystick_mode then
         quickslotnexpbar:SetAlpha(0)
         quickslotnexpbar:ShowWindow(1)
+    end
+    -- Without this table the loop dies outright; do not rely on the UI script having run.
+    if type(g.qso_potion_map) ~= "table" then
+        Quickslot_operate_build_potion_map()
+    end
+    if type(g.qso_potion_map) ~= "table" then
+        return
     end
     local atk_list = g.quickslot_operate_atk_list
     for i = 1, MAX_QUICKSLOT_CNT do
@@ -23797,10 +23847,21 @@ function Quickslot_operate_check_all_slots(race, down_potion_id, atk_id, def_id)
     QUICKSLOTNEXPBAR_UPDATE_HOTKEYNAME(quickslotnexpbar)
     if joystick_mode then
         quickslotnexpbar:ShowWindow(0)
-        quickslotnexpbar:SetAlpha(100)
+        -- ShowWindow(0) lands a frame later, so restoring the alpha right here paints the bar
+        -- opaque for a frame or two and it visibly flashes. Restore it once the hide applied.
+        -- 숨김이 한 프레임 늦게 반영된다 -> 알파를 지금 되돌리면 바가 번쩍인다
+        ReserveScript("Quickslot_operate_restore_bar_alpha()", 1.0)
     end
     DebounceScript("QUICKSLOTNEXTBAR_UPDATE_ALL_SLOT", 0.1)
     DebounceScript("JOYSTICK_QUICKSLOT_UPDATE_ALL_SLOT", 0.1)
+end
+
+-- Restore the bar opacity after the hide actually applied (see the ReserveScript above).
+function Quickslot_operate_restore_bar_alpha()
+    local bar = ui.GetFrame("quickslotnexpbar")
+    if bar ~= nil then
+        bar:SetAlpha(100)
+    end
 end
 
 function Quickslot_operate_frame_close()
@@ -23817,7 +23878,8 @@ function Quickslot_operate_map_change(_nexus_addons, Quickslot_operate_map_timer
             local potion_type = Quickslot_operate_get_potion_type(g.quickslot_operate_indun_type)
             if potion_type then
                 quickslotnexpbar:SetUserValue("POT_TYPE", potion_type)
-                quickslotnexpbar:RunUpdateScript("Quickslot_operate_get_potion", 2.0)
+                -- not an update script: the bar is hidden in joypad mode and would never tick
+                ReserveScript("Quickslot_operate_get_potion_delayed()", 2.0)
                 return
             end
         end
@@ -23829,7 +23891,8 @@ function Quickslot_operate_map_change(_nexus_addons, Quickslot_operate_map_timer
             else
                 quickslotnexpbar:SetUserValue("POT_TYPE", "Velnias")
             end
-            quickslotnexpbar:RunUpdateScript("Quickslot_operate_get_potion", 2.0)
+            -- not an update script: the bar is hidden in joypad mode and would never tick
+            ReserveScript("Quickslot_operate_get_potion_delayed()", 2.0)
             return
         end
     end
@@ -23859,6 +23922,19 @@ function Quickslot_operate_get_potion_type(indun_type)
         end
     end
     return nil
+end
+
+-- Calls the swap 2s later without hanging the timer off the keyboard bar.
+-- quickslotnexpbar:RunUpdateScript(...) only ticks while that frame is shown, and in joypad mode
+-- it never is, so the map-change swap silently never happened. POT_TYPE is a UserValue and
+-- survives while hidden, so only the timer had to move.
+-- 업데이트 스크립트는 그 프레임이 보일 때만 돈다 -> 프레임에 매이지 않는 ReserveScript 로
+function Quickslot_operate_get_potion_delayed()
+    local bar = ui.GetFrame("quickslotnexpbar")
+    if bar == nil then
+        return
+    end
+    Quickslot_operate_get_potion(bar)
 end
 
 function Quickslot_operate_get_potion(quickslotnexpbar)
