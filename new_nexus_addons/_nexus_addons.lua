@@ -53,12 +53,13 @@
 -- 1.1.5 "Challenge Helper: the escape-portal and boss-appeared notices no longer flood the chat on a normal field map. A field challenge broadcasts the same progress message and minimap-mark updates as an instanced one, and the game sends them every second, so the notices fired again and again: the minimap update re-arms the portal notice whenever the mark goes away and comes back, and every SHOW / GAUGERESET re-armed the boss notice even when the stage had not changed. Notices are now limited to an actual challenge instance, the same line cannot repeat within 60 seconds, and the boss notice is re-armed only when the stage really changes. The HUD itself is unchanged"
 -- 1.1.6 "QSO: the raid potion swap now works on the FIRST entry in joypad mode. Three separate defects all came from the same habit of hanging work off the keyboard quickslot bar, which is always hidden in joypad mode, and an update script only ticks while its frame is shown. The table of swappable potion ids was built only inside the bar update script, so the first swap died with an index-nil error and only worked from the second attempt, once the failed attempt had left the bar shown; the map-change swap was scheduled as an update script on that same hidden bar and never fired at all; and the writes ran in the same frame as ShowWindow(1), which does not take effect until the next frame, so the Item branch of SET_QUICK_SLOT silently wrote nothing. The potion table is now built where it is needed, both delayed calls use ReserveScript, and the writes happen one tick after the bar is shown. The bar also no longer flashes: its opacity is restored after the hide has actually applied instead of in the same frame"
 -- 1.1.7 "IP: the Sanctuary of Resonance (Zawra) entry button no longer walks you straight in. That dungeon makes you pick an entry step - indun_step.ies lists ten of them and you choose up to the one you have unlocked - but the panel called the plain solo auto-enter, so the step choice was skipped entirely. The button now opens the game's own step-selection window, the same one the in-game Enter button opens, and you press enter there. The check reads DungeonType off the dungeon class instead of hardcoding id 732, so further Sanctuary bosses are covered as they are added, and on a client without that window it falls back to the plain entry dialog rather than to the auto enter"
+-- 1.1.8 "IP: the raid auto-match / sweep ticket button now spends an expiring ticket first. It used to take whichever ticket came first in an internal table, and the three rows added for the newer raids (Zmei, False Radiance, Fallen Judgment) list their ids in ascending order, which happens to be tradable -> untradeable -> 7-day. So a tradable ticket was burned while a timed one sat in the bag expiring; the older raids listed the timed id first and were fine by accident. The choice now reads the item class - LifeTime for a timed ticket, MarketTrade for an untradeable one - so the order is expiring, then untradeable, then tradable regardless of how the table is written, and it keeps working for raids added later. The button also reports which ticket it consumed, since its count is the sum of all three grades. Boss Direction: the frame layer label had its language test inverted, so every non-Japanese client saw Japanese"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.1.7"
+local ver = "1.1.8"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -4753,8 +4754,11 @@ function Indun_panel_enter_singularity(frame, ctrl, str, indun_type)
     end
 end
 
+-- 레이드 입장권 표. **여기 적힌 순서는 우선순위가 아니다** —
+-- 무엇을 먼저 쓸지는 Indun_panel_ticket_rank 가 아이템 속성으로 정한다(아래 주석 참고).
+-- ⚠️ 그래도 같은 등급끼리는 이 순서를 지킨다(동점은 앞에 적힌 것이 이긴다)
 local raid_tbl = {
-    -- EP18.2: 거짓된 광휘 / 타락한 심판 (자동 매칭 ID 기준). 순서 = 거래가능 / 거래불가 / 7일
+    -- EP18.2: 거짓된 광휘 / 타락한 심판 (자동 매칭 ID 기준). ID 오름차순 = 거래가능 / 거래불가 / 7일
     [733] = {11210072, 11210073, 11210074},
     [736] = {11210076, 11210077, 11210078},
     [729] = {11210061, 11210062, 11210063},
@@ -4838,6 +4842,43 @@ function Indun_panel_create_frame_onsweep(indun_panel, key, sub_key, sub_value, 
     end
 end
 
+-- 입장권 우선순위. 낮은 값을 먼저 쓴다.
+--   1 = 기간제(LifeTime > 0)      — 놔두면 사라지므로 가장 먼저
+--   2 = 거래불가(MarketTrade NO)  — 팔 수 없으니 그다음
+--   3 = 거래가능                  — 팔 수 있으니 마지막
+-- 🔑 ID 목록이 아니라 **클래스 프로퍼티**로 판정한다 → 레이드가 추가돼도, 표에 적는 순서가
+--    무엇이든 규칙이 유지된다. `item_EP13.ies` 의 이름 규칙(_LimitTime / _NoTrade)과도 일치하고,
+--    TOS 코인 상점판(_limit_renew, LifeTime 14일)도 기간제로 잡힌다
+-- reads the item class instead of trusting the table order
+local function Indun_panel_ticket_rank(class_id)
+    local cls = GetClassByType("Item", class_id)
+    if cls == nil then
+        return 3
+    end
+    -- ⚠️ 클라 선례가 tonumber 로 감싼다(alchemist_shared.lua:134) — 문자열로 올 수 있다
+    if (tonumber(TryGetProp(cls, "LifeTime", 0)) or 0) > 0 then
+        return 1
+    end
+    if TryGetProp(cls, "MarketTrade", "YES") == "NO" then
+        return 2
+    end
+    return 3
+end
+
+-- 어떤 등급의 입장권을 실제로 썼는지 알려준다.
+-- 🔑 인벤토리 개수만으로는 **무엇이 줄었는지** 보기 어렵다 — 버튼의 "보유 수량" 은 세 등급을
+--    합산한 값이라, 순서가 틀렸다는 것을 사용자가 확인할 방법이 없었다(2026-09-09 제보).
+-- tells you which grade was actually consumed; the button's count sums all three grades
+local function Indun_panel_ticket_use(ticket_item, class_id)
+    INV_ICON_USE(ticket_item)
+    local cls = GetClassByType("Item", class_id)
+    local name = cls ~= nil and TryGetProp(cls, "Name", "") or ""
+    local grades = g.lang == "Japanese" and {"期間制", "取引不可", "取引可能"} or
+                       {"expiring", "untradeable", "tradable"}
+    ui.SysMsg(string.format(g.lang == "Japanese" and "入場券使用: %s (%s)" or "Ticket used: %s (%s)",
+        tostring(name), tostring(grades[Indun_panel_ticket_rank(class_id)])))
+end
+
 function Indun_panel_raid_itemuse(indun_panel, ctrl, str, indun_type)
     local target_items = raid_tbl[indun_type]
     local buff_id = buff_ids[indun_type]
@@ -4859,13 +4900,28 @@ function Indun_panel_raid_itemuse(indun_panel, ctrl, str, indun_type)
         ui.SysMsg(g.lang == "Japanese" and "掃討バフがありません" or "There is no auto clear buff")
         return
     end
+    -- 🔑 **목록 순서가 아니라 아이템 등급으로 고른다: 기간제 → 거래불가 → 거래가능.**
+    --    (챌린지·분열의 규칙과 같다 — .claude/docs/indun-panel-ticket-order.md)
+    -- 🔴 예전에는 "표에서 처음 발견한 것" 을 썼다. 그래서 EP18.x 로 추가된 세 줄
+    --    (729 즈메이 / 733 거짓된 광휘 / 736 타락한 심판)은 ID 를 오름차순으로 적어 둔 탓에
+    --    **거래가능 티켓부터 소모했다** — 기간제가 남아 있어도 먼저 쓰지 않았다(2026-09-09 제보).
+    --    옛 줄들은 기간제를 앞에 적어놔서 우연히 맞고 있었다. 이제 표 순서에 의존하지 않는다
+    -- 🔑 동점(같은 등급)은 **표에 먼저 적힌 것**이 이긴다 — table.sort 를 쓰지 않으므로
+    --    동점 순서가 불확정해지는 일이 없다(옛 사고: lua-table-sort-not-stable)
+    -- pick by item grade, not by list position: expiring first, then untradeable, then tradable
     local ticket_item = nil
+    local ticket_class = nil
     if target_items then
+        local best_rank = nil
         for _, class_id in ipairs(target_items) do
             local inv_item = session.GetInvItemByType(class_id)
             if inv_item then
-                ticket_item = inv_item
-                break
+                local rank = Indun_panel_ticket_rank(class_id)
+                if best_rank == nil or rank < best_rank then
+                    best_rank = rank
+                    ticket_item = inv_item
+                    ticket_class = class_id
+                end
             end
         end
     end
@@ -4874,7 +4930,7 @@ function Indun_panel_raid_itemuse(indun_panel, ctrl, str, indun_type)
             ReqUseRaidAutoSweep(indun_type)
         else
             if ticket_item then
-                INV_ICON_USE(ticket_item)
+                Indun_panel_ticket_use(ticket_item, ticket_class)
                 ReserveScript(string.format("ReqUseRaidAutoSweep(%d)", indun_type), 0.5)
             else
                 ui.SysMsg(g.lang == "Japanese" and "入場回数不足（チケットなし）" or
@@ -4883,7 +4939,7 @@ function Indun_panel_raid_itemuse(indun_panel, ctrl, str, indun_type)
         end
     else
         if ticket_item then
-            INV_ICON_USE(ticket_item)
+            Indun_panel_ticket_use(ticket_item, ticket_class)
         else
             if string.find(ctrl:GetName(), "use") then
                 ui.SysMsg(g.lang == "Japanese" and "(自動マッチング/1人)入場券を持っていません" or
@@ -29574,7 +29630,9 @@ function Boss_direction_settings_frame_init()
     boss_direction_gb:RemoveAllChild()
     local layer = boss_direction_gb:CreateOrGetControl('richtext', 'layer', 10, 10)
     AUTO_CAST(layer)
-    layer:SetText(g.lang ~= "Japanese" and "{ol}フレームレイヤー設定" or "{ol}Frame Layer Settings")
+    -- 🔴 업스트림은 조건이 뒤집혀 있었다(`~=`) → 일본어가 아닌 클라에 일본어가 나왔다.
+    --    이식본은 이미 고쳐져 있었다(langswap.js 로 발견, 2026-09-09)
+    layer:SetText(g.lang == "Japanese" and "{ol}フレームレイヤー設定" or "{ol}Frame Layer Settings")
     local layer_edit = boss_direction_gb:CreateOrGetControl('edit', 'layer_edit', layer:GetWidth() + 20, 5, 60, 30)
     AUTO_CAST(layer_edit)
     layer_edit:SetText("{ol}" .. g.boss_direction_settings.layer)
