@@ -11,7 +11,7 @@
 --   ported from nexus vakarine_equip, with its unbounded retries, nondeterministic ordering,
 --   duplicate message registration and per-hit equipment scan all fixed
 local addonName = "auto_keeper"
-local version = "1.2.0"
+local version = "1.2.1"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -40,7 +40,7 @@ local AK_LANG = {
         f_repair = "장비 자동 수리",
         tip_stamina = "{ol}스태미나가 %d%% 이하로 떨어지면 알약을 먹습니다{nl}도시와 이벤트 맵에서는 동작하지 않습니다",
         tip_potion = "{ol}체력이 %d%% 이상이 되면 물약 회복 버프를 해제합니다{nl}그 아래에서는 그대로 둡니다",
-        tip_relic = "{ol}던전 입장창에서 성물 마력이 덜 찼으면 엑토나이트로 채웁니다{nl}도시와 성역은 게임 기본 자동충전이 이미 처리합니다",
+        tip_relic = "{ol}던전 입장창에서 성물 마력이 덜 찼으면 엑토나이트로 채웁니다{nl}미지의 성역 안에서는 마력이 200 미만이면 채웁니다{nl}도시는 게임 기본 자동충전이 처리합니다",
         tip_repair = "{ol}내구도가 %d%% 미만인 장비를 수리 도구로 수리합니다",
         no_kit = "[Auto Keeper] 수리 도구가 없습니다.",
         no_autobuy = "[Auto Keeper] 수리 도구가 모자라지만 자동구매가 꺼져 있어 사지 않았습니다.",
@@ -96,7 +96,7 @@ local AK_LANG = {
         f_repair = "装備の自動修理",
         tip_stamina = "{ol}スタミナが %d%% 以下になると丸薬を使います{nl}街とイベントマップでは動作しません",
         tip_potion = "{ol}HP が %d%% 以上になるとポーションの回復バフを解除します{nl}それ未満ではそのままにします",
-        tip_relic = "{ol}ダンジョン入場画面でレリック魔力が満タンでなければエクトナイトで補充します{nl}街と聖域はゲーム標準の自動チャージが処理します",
+        tip_relic = "{ol}ダンジョン入場画面でレリック魔力が満タンでなければエクトナイトで補充します{nl}未知の聖域では魔力が200未満になると補充します{nl}街はゲーム標準の自動チャージが処理します",
         tip_repair = "{ol}耐久度が %d%% 未満の装備を修理道具で修理します",
         no_kit = "[Auto Keeper] 修理道具がありません。",
         no_autobuy = "[Auto Keeper] 修理道具が足りませんが、自動購入がオフのため購入しません。",
@@ -149,7 +149,7 @@ local AK_LANG = {
         f_repair = "Auto repair gear",
         tip_stamina = "{ol}Eats a pill when stamina drops to %d%% or less{nl}Does nothing in cities and event maps",
         tip_potion = "{ol}Removes the potion heal buff once HP reaches %d%%{nl}Below that it is left alone",
-        tip_relic = "{ol}Tops relic power up with Ectonite at the dungeon entry window{nl}Cities and the Sanctuary are already covered by the built-in auto charge",
+        tip_relic = "{ol}Tops relic power up with Ectonite at the dungeon entry window{nl}Inside the Unknown Sanctuary it refills once power drops below 200{nl}Cities are covered by the built-in auto charge",
         tip_repair = "{ol}Repairs gear below %d%% durability with repair kits",
         no_kit = "[Auto Keeper] No repair kit.",
         no_autobuy = "[Auto Keeper] Repair kits are low, but auto-buy is off so none were bought.",
@@ -248,6 +248,15 @@ local AK_NOPILL_RETRY = 5.0
 -- (relicmanager.lua:474-484)
 local AK_ECTONITE = {"misc_Ectonite", "misc_Ectonite_Care"}
 local AK_RELIC_TX = "RELIC_CHARGE_RP"
+-- 미지의 성역 안에서는 던전 입장창이 없어 위 경로가 한 번도 안 돈다 → 별도 폴링이 필요하다.
+-- 값은 nexus dungeon_rp_charger(meldavy 제작)와 같다: 3초마다 보고 200 미만이면 채운다
+-- (최대 1000 = sharedconst.ies:171 RELIC_MAX_RP, 엑토나이트 1개 = 10).
+-- 🔑 "덜 찼으면" 이 아니라 "낮으면" 이다 — 전투 중 RP 가 계속 줄어드는 자리라 max 미만마다
+--    채우면 트랜잭션이 3초마다 날아간다
+-- the sanctuary has no entry window, so the path above never fires there; same numbers as the
+-- nexus dungeon_rp_charger: poll every 3s and refill once RP drops below 200 of 1000
+local AK_RELIC_LOW = 200
+local AK_RELIC_TICK = 3.0
 
 -- 수리 도구 목록. **상한이 높은 것이 앞**이다.
 --   EP18.2 로 Lv.560 키트(사울레 인증서)가 나왔다. 상한(NumberArg2)이 560 이라 하위 호환이고,
@@ -1012,6 +1021,70 @@ function AK_relic_verify(frame)
     return 0
 end
 
+-- 지금 있는 맵이 미지의 성역인가.
+-- 🔑 맵 ID 를 나열하지 않고 **클라 자동충전과 같은 기준**으로 본다 — relicmanager.lua:495-511 은
+--    MapType 이 "City" 이거나 Keyword 에 "SilverDrop" 이 있을 때만 채운다. 2026-09-08 기준
+--    SilverDrop 을 가진 맵은 미지의 성역 1/2/3층(11239/11242/11244) 셋뿐이고, 층이 늘어도 같은
+--    키워드를 받는다(그것이 게임 기본 충전을 켜는 스위치이므로)
+-- 🔴 nexus 원본(dungeon_rp_charger)은 map_id == 11244 로 3층만 하드코딩해서 1·2층에서는 안 돌았다
+-- ⚠️ 도시는 게임 기본 자동충전이 실제로 처리하므로 여기서 뺀다(City 는 false)
+-- the client's own auto charge allows City or the SilverDrop keyword, and SilverDrop is
+-- exclusive to the three sanctuary floors, so the keyword is safer than an ID list
+-- 결과는 맵 이름으로 캐시한다. 3초마다 불리는 자리다 / memoised by zone name
+local function AK_relic_sanctum()
+    local pc = GetMyPCObject()
+    if not pc then
+        return false
+    end
+    local zone = GetZoneName(pc)
+    if g.relic_zone == zone then
+        return g.relic_sanctum
+    end
+    local found = false
+    local ok, map_cls = pcall(GetClass, "Map", zone)
+    if ok and map_cls and TryGetProp(map_cls, "MapType", "None") ~= "City" then
+        local keyword = TryGetProp(map_cls, "Keyword", "None")
+        if keyword ~= nil and keyword ~= "None" then
+            local cut = SCR_STRING_CUT(keyword, ";")
+            for i = 1, #cut do
+                if cut[i] == "SilverDrop" then
+                    found = true
+                    break
+                end
+            end
+        end
+    end
+    g.relic_zone = zone
+    g.relic_sanctum = found
+    return found
+end
+
+-- 가진 엑토나이트를 넘겨 충전한다. 하나도 없으면 false
+-- 게임의 자동 충전 경로(RELIC_AUTO_CHARGE)와 똑같이 트랜잭션 하나만 부른다.
+-- ⚠️ CloneTempObj('RELIC_RP_TEMPOBJ', ...) 는 수동 창(_RELICMANAGER_CHARGE_EXEC)에만 있다.
+-- 그건 창의 전/후 표시용이라 자동 경로에는 없다 — 여기서도 부르지 않는다.
+-- 엑토나이트를 보유 전량 넘기는 것도 게임 자동 경로와 같다(수동 창만 입력 수량을 쓴다)
+-- ⚠️ CloneTempObj belongs to the manual window only, for its before/after display; the
+-- game's own auto path does not call it, and neither do we. passing the whole Ectonite
+-- stack also matches the auto path - only the manual window uses a typed quantity
+local function AK_relic_charge()
+    session.ResetItemList()
+    local added = 0
+    for _, name in ipairs(AK_ECTONITE) do
+        local inv_item = session.GetInvItemByName(name)
+        if inv_item and inv_item.isLockState ~= true and inv_item.count > 0 then
+            session.AddItemID(inv_item:GetIESID(), inv_item.count)
+            added = added + inv_item.count
+        end
+    end
+    if added == 0 then
+        return false
+    end
+    item.DialogTransaction(AK_RELIC_TX, session.GetItemIDList())
+    return true
+end
+
+-- 던전 입장창이 열려 있을 때의 보완 충전(원래 있던 경로)
 function AK_relic_check(frame)
     if not AK_on("relic") or not g.ready then
         return 0
@@ -1024,33 +1097,41 @@ function AK_relic_check(frame)
     if cur == nil or cur >= max then
         return 1
     end
-
-    session.ResetItemList()
-    local added = 0
-    for _, name in ipairs(AK_ECTONITE) do
-        local inv_item = session.GetInvItemByName(name)
-        if inv_item and inv_item.isLockState ~= true and inv_item.count > 0 then
-            session.AddItemID(inv_item:GetIESID(), inv_item.count)
-            added = added + inv_item.count
-        end
-    end
-    if added == 0 then
+    if not AK_relic_charge() then
         CHAT_SYSTEM(AK_t("no_ecto"))
         return 0
     end
 
-    -- 게임의 자동 충전 경로(RELIC_AUTO_CHARGE)와 똑같이 트랜잭션 하나만 부른다.
-    -- ⚠️ CloneTempObj('RELIC_RP_TEMPOBJ', ...) 는 수동 창(_RELICMANAGER_CHARGE_EXEC)에만 있다.
-    -- 그건 창의 전/후 표시용이라 자동 경로에는 없다 — 여기서도 부르지 않는다.
-    -- 엑토나이트를 보유 전량 넘기는 것도 게임 자동 경로와 같다(수동 창만 입력 수량을 쓴다)
-    -- ⚠️ CloneTempObj belongs to the manual window only, for its before/after display; the
-    -- game's own auto path does not call it, and neither do we. passing the whole Ectonite
-    -- stack also matches the auto path - only the manual window uses a typed quantity
-    item.DialogTransaction(AK_RELIC_TX, session.GetItemIDList())
-
     frame:StopUpdateScript("AK_relic_check")
     frame:RunUpdateScript("AK_relic_verify", 1.0)
     return 0
+end
+
+-- 미지의 성역 안에서 도는 폴링.
+-- 🔴 **이 경로가 없어서 성역에서 충전이 안 됐다**(2026-09-08 제보). 입장창 경로는 **입장 직전**만
+--    메꾼다 — 성역 안에는 그 창이 없으니 영원히 조기 return 했다
+-- 🔑 반환값 규칙: 1 = 계속 / 0 = 중지. 조기 return 경로에도 값을 넣는다
+function AK_relic_sanctum_tick(frame)
+    -- ⚠️ 여기서 0 을 돌리면 안 된다 — 맵 진입 유예(g.ready) 동안 멈춰 버려 그 맵에서는 두 번
+    --    다시 안 돈다. 기능을 끄는 쪽은 AK_relic_watch_start 가 이 틱을 멈춘다
+    -- returning 0 here would kill the tick during the post-map-entry grace period
+    if not AK_on("relic") or not g.ready then
+        return 1
+    end
+    if not AK_relic_sanctum() then
+        return 1
+    end
+    local cur, max = AK_relic_rp()
+    if cur == nil or cur >= max or cur >= AK_RELIC_LOW then
+        return 1
+    end
+    if not AK_relic_charge() then
+        -- 3초마다 같은 말을 반복하지 않도록 멈춘다. 다음 맵 진입에서 다시 걸린다
+        -- stop instead of repeating the same line every 3s; the next map entry re-arms it
+        CHAT_SYSTEM(AK_t("no_ecto"))
+        return 0
+    end
+    return 1
 end
 
 -- 감시 타이머는 우리 프레임에서 돌린다.
@@ -1062,8 +1143,10 @@ function AK_relic_watch_start()
     end
     g.frame:StopUpdateScript("AK_relic_check")
     g.frame:StopUpdateScript("AK_relic_verify")
+    g.frame:StopUpdateScript("AK_relic_sanctum_tick")
     if AK_on("relic") then
         g.frame:RunUpdateScript("AK_relic_check", 0.5)
+        g.frame:RunUpdateScript("AK_relic_sanctum_tick", AK_RELIC_TICK)
     end
 end
 
@@ -2771,6 +2854,27 @@ end
 -- 진단용 `/keeper vk`. 자동 실행이 안 도는 이유는 셋 중 하나다: 캐릭터 설정이 꺼졌거나,
 -- 바카리네 5세트가 아니거나, 맵이 대상이 아니거나. 세 판정을 그대로 찍는다
 -- diagnostic: the three gates the auto run has to pass, printed as-is
+-- 진단용 `/keeper rp`. 성물 마력과 성역 판정, 엑토나이트 보유량을 한 줄에 모은다.
+-- 성역에서 충전이 안 되면 원인은 대개 넷이다: 기능 꺼짐 / 성역 판정 실패 / RP 가 기준선 위 /
+-- 엑토나이트 없음. 각 값이 곧 AK_relic_sanctum_tick 의 조기 종료 지점이다
+-- diagnostic: every value here is one of the early returns in AK_relic_sanctum_tick
+function AK_dump_rp()
+    local cur, max = AK_relic_rp()
+    local counts = {}
+    for _, name in ipairs(AK_ECTONITE) do
+        local inv_item = session.GetInvItemByName(name)
+        table.insert(counts, string.format("%s %d", name,
+            (inv_item ~= nil and inv_item.count) or 0))
+    end
+    local pc = GetMyPCObject()
+    CHAT_SYSTEM(string.format(
+        "[Auto Keeper] 성물충전 %s | RP %s/%s (성역은 %d 미만이면 채움) | 맵 %s | 성역 %s | ready %s",
+        AK_on("relic") and "켜짐" or "꺼짐", tostring(cur), tostring(max), AK_RELIC_LOW,
+        tostring(pc ~= nil and GetZoneName(pc) or "?"), tostring(AK_relic_sanctum()),
+        tostring(g.ready)))
+    CHAT_SYSTEM(string.format("[Auto Keeper] 엑토나이트: %s", table.concat(counts, " / ")))
+end
+
 function AK_dump_vk()
     g.vk_dirty = true          -- 진단은 캐시를 믿지 않고 지금 다시 잰다 / always re-measure
     local c = AK_vk_char()
@@ -2848,6 +2952,10 @@ function AK_SLASH(command)
     end
     if command ~= nil and command[1] == "dur" then
         AK_dump_dur()
+        return
+    end
+    if command ~= nil and command[1] == "rp" then
+        AK_dump_rp()
         return
     end
     if command ~= nil and command[1] == "vk" then
