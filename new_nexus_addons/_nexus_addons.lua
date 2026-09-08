@@ -52,12 +52,13 @@
 -- 1.1.4 "IP: the challenge and singularity entry tickets now follow the order they are written in. A permanent untradeable ticket is spent before buying one, and a tradeable one is kept for last - previously the loop overwrote its pick so the LAST id in the list won, which made Lv.540 and Lv.560 behave in opposite ways, and the time-limited list was sorted with table.sort on a key that ties for almost every ticket (a 1-day pass has exactly 86400 left, so it never counted as under a day). The ticket lists are now split into expiring / no_trade / tradable and the sort breaks ties by list position"
 -- 1.1.5 "Challenge Helper: the escape-portal and boss-appeared notices no longer flood the chat on a normal field map. A field challenge broadcasts the same progress message and minimap-mark updates as an instanced one, and the game sends them every second, so the notices fired again and again: the minimap update re-arms the portal notice whenever the mark goes away and comes back, and every SHOW / GAUGERESET re-armed the boss notice even when the stage had not changed. Notices are now limited to an actual challenge instance, the same line cannot repeat within 60 seconds, and the boss notice is re-armed only when the stage really changes. The HUD itself is unchanged"
 -- 1.1.6 "QSO: the raid potion swap now works on the FIRST entry in joypad mode. Three separate defects all came from the same habit of hanging work off the keyboard quickslot bar, which is always hidden in joypad mode, and an update script only ticks while its frame is shown. The table of swappable potion ids was built only inside the bar update script, so the first swap died with an index-nil error and only worked from the second attempt, once the failed attempt had left the bar shown; the map-change swap was scheduled as an update script on that same hidden bar and never fired at all; and the writes ran in the same frame as ShowWindow(1), which does not take effect until the next frame, so the Item branch of SET_QUICK_SLOT silently wrote nothing. The potion table is now built where it is needed, both delayed calls use ReserveScript, and the writes happen one tick after the bar is shown. The bar also no longer flashes: its opacity is restored after the hide has actually applied instead of in the same frame"
+-- 1.1.7 "IP: the Sanctuary of Resonance (Zawra) entry button no longer walks you straight in. That dungeon makes you pick an entry step - indun_step.ies lists ten of them and you choose up to the one you have unlocked - but the panel called the plain solo auto-enter, so the step choice was skipped entirely. The button now opens the game's own step-selection window, the same one the in-game Enter button opens, and you press enter there. The check reads DungeonType off the dungeon class instead of hardcoding id 732, so further Sanctuary bosses are covered as they are added, and on a client without that window it falls back to the plain entry dialog rather than to the auto enter"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.1.6"
+local ver = "1.1.7"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -4903,7 +4904,33 @@ function Indun_panel_sweep_count(buff_id)
     return 0
 end
 
+-- 입장 단계를 골라야 하는 인던. 자동으로 들여보내면 사용자가 단계를 고를 수 없다
+-- (공명의 성소: 자우라 — `indun_step.ies` 에 단계 1~10 이 있고 해금한 단계까지 고른다).
+-- 게임의 "입장하기" 버튼도 자동 입장이 아니라 이 창을 띄운다:
+--   indunInfo_button.ies 30행 DungeonType=SanctuartyResonance → RedButtonScp=REQ_ENTER_INDUNINFO
+--   → shared_induninfo_button.on_click → SHOW_INDUNENTER_SELECT_STEP_DIALOG
+--   (창 = addon.ipf/indunenter_select_step, EP18.2 에 추가됐다)
+-- 🔑 **ID(732) 가 아니라 DungeonType 으로 본다** — 같은 종류의 인던이 추가되면 ID 목록은 깨진다
+--    (indun.ies 732: DungeonType=SanctuartyResonance, Difficulty=자우라 → 보스가 늘어날 자리다)
+-- dungeons that make you pick an entry step must not be auto-entered: open the game's own
+-- step-selection window and let the player press enter there
+local INDUN_STEP_SELECT_TYPES = {
+    SanctuartyResonance = true            -- 공명의 성소 (EP18.2)
+}
+
 function Indun_panel_enter_solo(indun_panel, ctrl, str, indun_type)
+    local step_cls = GetClassByType("Indun", indun_type)
+    if step_cls and INDUN_STEP_SELECT_TYPES[TryGetProp(step_cls, "DungeonType", "None")] then
+        -- ⚠️ 이 창이 없는 옛 클라에서는 일반 입장창을 띄운다. 어느 쪽이든 **자동 입장은 안 한다**
+        -- on an older client without that window, fall back to the plain entry dialog - never
+        -- to the auto enter
+        if type(SHOW_INDUNENTER_SELECT_STEP_DIALOG) == "function" then
+            SHOW_INDUNENTER_SELECT_STEP_DIALOG(indun_type)
+        else
+            SHOW_INDUNENTER_DIALOG(indun_type)
+        end
+        return
+    end
     local pcparty = session.party.GetPartyInfo()
     if not pcparty then
         CREATE_PARTY_BTN()
