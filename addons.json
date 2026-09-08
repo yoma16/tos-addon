@@ -22,14 +22,14 @@
     "tags": ["yomae", "cupole", "addons", "toggle cupole potion", "toggle", "potion", "요매", "yoma16", "큐폴"]
   },
   {
-    "tosversion" : "20260908",
+    "tosversion" : "20260909",
     "name": "New Nexus Addons",
     "file": "new_nexus_addons",
     "extension": "ipf",
-    "fileVersion": "v1.1.7",
-    "releaseTag": "new_nexus_addons_v-1.1.7",
+    "fileVersion": "v1.1.8",
+    "releaseTag": "new_nexus_addons_v-1.1.8",
     "unicode": "⛄",
-    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.1.7: 인던 패널의 공명의 성소(자우라) 입장 버튼이 그대로 입장시키지 않습니다. 이 인던은 입장 단계를 골라야 하는데(해금한 단계까지 선택), 패널이 일반 자동 입장을 부르고 있어서 단계 선택이 통째로 건너뛰어졌습니다. 이제 게임의 단계 선택 창(게임 안 '입장하기' 버튼이 띄우는 그 창)을 열고, 입장은 그 창에서 직접 누릅니다. 판정은 던전 ID 를 박아 두지 않고 던전 클래스의 DungeonType 을 읽으므로, 공명의 성소 보스가 추가되면 그것도 함께 적용됩니다.<br><br>yomae's fork of norisan's Nexus Addons framework. <br>v1.1.7: the Sanctuary of Resonance (Zawra) entry button on the indun panel no longer walks you straight in. That dungeon makes you pick an entry step - you choose up to the one you have unlocked - but the panel called the plain auto-enter, so the step choice was skipped entirely. The button now opens the game's own step-selection window, the same one the in-game Enter button opens, and you press enter there. The check reads DungeonType off the dungeon class instead of a hardcoded dungeon id, so further Sanctuary bosses are covered as they are added.<br><br>norisan の Nexus Addons フレームワークの yomae フォーク。<br>v1.1.7: インダンパネルの共鳴の聖所(ザウラ)の入場ボタンが、そのまま入場しなくなりました。このインダンは入場段階を選ぶ必要があります(解放済みの段階まで選択)が、パネルが通常の自動入場を呼んでいたため段階選択が丸ごとスキップされていました。今はゲーム側の段階選択ウィンドウ(ゲーム内の「入場する」ボタンが開くものと同じ)を開き、入場はそのウィンドウで押します。判定はダンジョンIDを決め打ちせずダンジョンクラスの DungeonType を読むので、共鳴の聖所のボスが追加された場合も同じように適用されます。",
+    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.1.8: 레이드 자동매칭·소탕 입장권 버튼이 기간제 입장권을 먼저 씁니다. 지금까지는 내부 표에 먼저 적힌 것을 썼는데, 최근 레이드 3종(즈메이·거짓된 광휘·타락한 심판)은 아이템 ID 오름차순으로 적혀 있어서 그 순서가 거래가능 → 거래불가 → 7일이 됐습니다. 그래서 기간제가 가방에서 사라지는 동안 거래가능 티켓을 먼저 소모했습니다(옛 레이드는 기간제를 앞에 적어둬서 우연히 맞고 있었습니다). 이제 표 순서가 아니라 아이템 정보를 읽어 기간제(사용 기한) → 거래불가 → 거래가능 순으로 고르므로, 앞으로 추가되는 레이드에도 그대로 적용됩니다. 버튼의 보유 수량은 세 종류의 합이라 무엇이 줄었는지 보이지 않으므로, 어떤 입장권을 썼는지 알려주는 안내도 넣었습니다. <br>보스 방향 설정창의 레이어 항목이 언어 조건이 뒤집혀 있어 일본어가 아닌 클라이언트에서 일본어로 표시되던 것도 고쳤습니다.<br><br>yomae's fork of norisan's Nexus Addons framework. <br>v1.1.8: the raid auto-match / sweep ticket button now spends an expiring ticket first. It used to take whichever ticket came first in an internal table, and the three rows added for the newer raids (Zmei, False Radiance, Fallen Judgment) list their ids in ascending order, which happens to be tradable then untradeable then 7-day. So a tradable ticket was burned while a timed one sat in the bag expiring; the older raids listed the timed id first and were fine by accident. The choice now reads the item itself - LifeTime for a timed ticket, MarketTrade for an untradeable one - so the order is expiring, untradeable, tradable no matter how the table is written, and raids added later are covered too. Since the button's count is the sum of all three grades, it now also tells you which ticket it consumed. <br>Boss Direction: the frame layer label had its language test inverted, so every non-Japanese client saw Japanese.<br><br>norisan の Nexus Addons フレームワークの yomae フォーク。<br>v1.1.8: レイドの自動マッチング・掃討の入場券ボタンが期間制の入場券を先に使うようになりました。これまでは内部テーブルに先に書かれたものを使っていましたが、最近のレイド3種(ズメイ・偽りの光輝・堕落した審判)はアイテムIDの昇順で書かれており、その順序が取引可能 → 取引不可 → 7日になっていました。そのため期間制が期限切れになる間に取引可能な入場券を先に消費していました(古いレイドは期間制を先に書いていたため偶然正しく動いていました)。今はテーブルの順序ではなくアイテム情報を読み、期間制 → 取引不可 → 取引可能の順で選ぶため、今後追加されるレイドにもそのまま適用されます。ボタンの所持数は3種類の合計で何が減ったか分からないため、どの入場券を使ったかのお知らせも追加しました。<br>ボス方向設定ウィンドウのレイヤー項目が言語条件が反転しており、日本語以外のクライアントで日本語表示になっていた点も修正しました。",
     "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
   },
   {
