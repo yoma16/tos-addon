@@ -22,14 +22,14 @@
     "tags": ["yomae", "cupole", "addons", "toggle cupole potion", "toggle", "potion", "요매", "yoma16", "큐폴"]
   },
   {
-    "tosversion" : "20260907",
+    "tosversion" : "20260908",
     "name": "New Nexus Addons",
     "file": "new_nexus_addons",
     "extension": "ipf",
-    "fileVersion": "v1.1.6",
-    "releaseTag": "new_nexus_addons_v-1.1.6",
+    "fileVersion": "v1.1.7",
+    "releaseTag": "new_nexus_addons_v-1.1.7",
     "unicode": "⛄",
-    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.1.6: 조이패드 모드에서 레이드 물약 자동 교체가 이제 첫 입장에 바로 됩니다. 원인 셋이 모두 같은 습관에서 나왔습니다 — 작업을 키보드 퀵슬롯 바에 매달아 둔 것인데, 조이패드 모드에서 그 바는 늘 숨겨져 있고 업데이트 스크립트는 프레임이 보일 때만 돕니다. 바꿀 물약 목록이 그 바의 스크립트 안에서만 만들어져 첫 교체가 에러로 죽었고(두 번째부터 되던 이유는 실패한 첫 시도가 바를 띄워 놨기 때문입니다), 맵 이동 교체도 같은 숨겨진 바의 타이머라 아예 돌지 않았으며, 기록을 ShowWindow(1)과 같은 프레임에 해서 아무것도 안 써졌습니다. 이제 물약 목록은 필요한 곳에서 만들고, 지연 호출은 프레임에 매이지 않으며, 기록은 바가 실제로 보인 다음 틱에 합니다. 바가 번쩍이던 것도 함께 고쳤습니다.<br><br>yomae's fork of norisan's Nexus Addons framework. <br>v1.1.6: the raid potion swap now works on the FIRST entry in joypad mode. Three defects all came from the same habit of hanging work off the keyboard quickslot bar, which is always hidden in joypad mode, and an update script only ticks while its frame is shown. The table of swappable potion ids was built only inside that bar update script, so the first swap died with an index-nil error and only worked from the second attempt once the failed one had left the bar shown; the map-change swap was scheduled on that same hidden bar and never fired; and the writes ran in the same frame as ShowWindow(1), which does not take effect until the next frame, so SET_QUICK_SLOT silently wrote nothing. The table is now built where it is needed, the delayed calls use ReserveScript, and the writes happen one tick after the bar is shown. The bar no longer flashes either.<br><br>norisan の Nexus Addons フレームワークの yomae フォーク。<br>v1.1.6: ジョイパッドモードでレイド薬の自動入れ替えが初回入場から効くようになりました。原因3つはすべて同じ癖から来ています — 処理をキーボードクイックスロットバーにぶら下げていたことです。ジョイパッドモードではそのバーは常に隠れており、更新スクリプトはフレームが表示されている間しか回りません。入れ替え対象の薬リストがそのバーのスクリプト内でしか作られず初回がエラーで落ち(2回目から効いたのは失敗した初回がバーを表示したままにしたためです)、マップ移動時の入れ替えも同じ隠れたバーのタイマーで一度も動かず、書き込みも ShowWindow(1) と同じフレームで行っていたため何も書かれませんでした。リストは必要な場所で作り、遅延呼び出しはフレームに縛られず、書き込みはバーが実際に表示された次のティックで行います。バーがちらつく問題も併せて修正しました。",
+    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.1.7: 인던 패널의 공명의 성소(자우라) 입장 버튼이 그대로 입장시키지 않습니다. 이 인던은 입장 단계를 골라야 하는데(해금한 단계까지 선택), 패널이 일반 자동 입장을 부르고 있어서 단계 선택이 통째로 건너뛰어졌습니다. 이제 게임의 단계 선택 창(게임 안 '입장하기' 버튼이 띄우는 그 창)을 열고, 입장은 그 창에서 직접 누릅니다. 판정은 던전 ID 를 박아 두지 않고 던전 클래스의 DungeonType 을 읽으므로, 공명의 성소 보스가 추가되면 그것도 함께 적용됩니다.<br><br>yomae's fork of norisan's Nexus Addons framework. <br>v1.1.7: the Sanctuary of Resonance (Zawra) entry button on the indun panel no longer walks you straight in. That dungeon makes you pick an entry step - you choose up to the one you have unlocked - but the panel called the plain auto-enter, so the step choice was skipped entirely. The button now opens the game's own step-selection window, the same one the in-game Enter button opens, and you press enter there. The check reads DungeonType off the dungeon class instead of a hardcoded dungeon id, so further Sanctuary bosses are covered as they are added.<br><br>norisan の Nexus Addons フレームワークの yomae フォーク。<br>v1.1.7: インダンパネルの共鳴の聖所(ザウラ)の入場ボタンが、そのまま入場しなくなりました。このインダンは入場段階を選ぶ必要があります(解放済みの段階まで選択)が、パネルが通常の自動入場を呼んでいたため段階選択が丸ごとスキップされていました。今はゲーム側の段階選択ウィンドウ(ゲーム内の「入場する」ボタンが開くものと同じ)を開き、入場はそのウィンドウで押します。判定はダンジョンIDを決め打ちせずダンジョンクラスの DungeonType を読むので、共鳴の聖所のボスが追加された場合も同じように適用されます。",
     "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
   },
   {
