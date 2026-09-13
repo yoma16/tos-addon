@@ -54,12 +54,13 @@
 -- 1.1.6 "QSO: the raid potion swap now works on the FIRST entry in joypad mode. Three separate defects all came from the same habit of hanging work off the keyboard quickslot bar, which is always hidden in joypad mode, and an update script only ticks while its frame is shown. The table of swappable potion ids was built only inside the bar update script, so the first swap died with an index-nil error and only worked from the second attempt, once the failed attempt had left the bar shown; the map-change swap was scheduled as an update script on that same hidden bar and never fired at all; and the writes ran in the same frame as ShowWindow(1), which does not take effect until the next frame, so the Item branch of SET_QUICK_SLOT silently wrote nothing. The potion table is now built where it is needed, both delayed calls use ReserveScript, and the writes happen one tick after the bar is shown. The bar also no longer flashes: its opacity is restored after the hide has actually applied instead of in the same frame"
 -- 1.1.7 "IP: the Sanctuary of Resonance (Zawra) entry button no longer walks you straight in. That dungeon makes you pick an entry step - indun_step.ies lists ten of them and you choose up to the one you have unlocked - but the panel called the plain solo auto-enter, so the step choice was skipped entirely. The button now opens the game's own step-selection window, the same one the in-game Enter button opens, and you press enter there. The check reads DungeonType off the dungeon class instead of hardcoding id 732, so further Sanctuary bosses are covered as they are added, and on a client without that window it falls back to the plain entry dialog rather than to the auto enter"
 -- 1.1.8 "IP: the raid auto-match / sweep ticket button now spends an expiring ticket first. It used to take whichever ticket came first in an internal table, and the three rows added for the newer raids (Zmei, False Radiance, Fallen Judgment) list their ids in ascending order, which happens to be tradable -> untradeable -> 7-day. So a tradable ticket was burned while a timed one sat in the bag expiring; the older raids listed the timed id first and were fine by accident. The choice now reads the item class - LifeTime for a timed ticket, MarketTrade for an untradeable one - so the order is expiring, then untradeable, then tradable regardless of how the table is written, and it keeps working for raids added later. The button also reports which ticket it consumed, since its count is the sum of all three grades. Boss Direction: the frame layer label had its language test inverted, so every non-Japanese client saw Japanese"
+-- 1.1.9 "IP: the dungeon panel now enters when you still have entries left, instead of doing nothing. The challenge and singularity ticket buttons bailed out early whenever an entry was still available - which is correct for not wasting a ticket, but their own tooltip already promised 'Left Click: PT Entry / Right Click: Solo Entry', so a click that did nothing read as a broken button. They now enter directly, and party or solo is decided by the dungeon id the button already passes (1007 party, 1006 solo, 1004 for the Lv.540 row). Singularity has a single click and no party split. Two ticket-order fixes ride along: the Lv.560 singularity ticket flow was missing the tier split the challenge flow has, so it spent a tradable permanent ticket before buying - Lv.540 now spends what it holds first and Lv.560 keeps the tradable one for last, matching the challenge rule; and the Lv.560 challenge mercenary-badge button now buys first, since that currency resets each period so buying while the allowance lasts is the better trade, while the TOS-coin button and every Lv.540 path are unchanged. The 'Ticket used' notice added in 1.1.8 is gone - it existed only to make the ordering verifiable and became noise once confirmed"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.1.8"
+local ver = "1.1.9"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -4411,9 +4412,10 @@ function Indun_panel_challenge_frame(indun_panel, key, sub_key, indun_type, y, x
     AUTO_CAST(buyuse_high_pvp)
     local text_high_pvp = string.format("{ol}%s{#FFFFFF}USEor{img pvpmine_shop_btn_total %d %d}{#FFFFFF}%s", ip_f(16),
         ip_s(18), ip_s(18), Indun_panel_get_recipe_trade_count("PVP_MINE_40") or 0)
+    -- 이 버튼만 구매가 1순위다(2026-09-13). 툴팁과 동작이 어긋나면 안 되므로 같이 바꾼다
     local tooltip_high_pvp = g.lang == "Japanese" and
-                                 IP_TIP_OL .. "左クリック: PT入場{nl}右クリック: ソロ入場{nl}優先順位{nl}1.期限付き{nl}2.{img pvpmine_shop_btn_total 20 20}チケット(買って使います){nl}3.期限なし" or
-                                 IP_TIP_OL .. "Left Click: PT Entry{nl}Right Click: Solo Entry{nl}Priority{nl}1.Expiring{nl}2.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}3.Non-expiring"
+                                 IP_TIP_OL .. "左クリック: PT入場{nl}右クリック: ソロ入場{nl}優先順位{nl}1.{img pvpmine_shop_btn_total 20 20}チケット(買って使います){nl}2.期限付き{nl}3.期限なし" or
+                                 IP_TIP_OL .. "Left Click: PT Entry{nl}Right Click: Solo Entry{nl}Priority{nl}1.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}2.Expiring{nl}3.Non-expiring"
     buyuse_high_pvp:SetText(text_high_pvp)
     buyuse_high_pvp:SetTextTooltip(icon_text_high .. tooltip_high_pvp)
     buyuse_high_pvp:SetEventScript(ui.LBUTTONUP, "Indun_panel_challenge_item_use")
@@ -4426,9 +4428,13 @@ end
 
 function Indun_panel_challenge_item_use(indun_panel, ctrl, mode, indun_type)
     local entrance_count = Indun_panel_get_entrance_count(indun_type, 4)
-    -- 남은 입장 횟수가 0 일 때만 입장권을 쓴다(있으면 그냥 들어가면 된다)
-    -- only spend a ticket when there is no entry left
+    -- 남은 입장 횟수가 0 일 때만 입장권을 쓴다.
+    -- 횟수가 남아 있으면 예전에는 아무것도 하지 않았는데, 이 버튼의 툴팁은 이미
+    -- "좌클릭: 파티 입장 / 우클릭: 솔로 입장" 을 약속하고 있었다 -> 그냥 입장시킨다(2026-09-13).
+    -- 파티/솔로는 버튼이 넘겨준 indun_type 이 구분한다(1007=파티 / 1006=솔로 / 1004=540 솔로)
+    -- the tooltip already promised entry; with entries left, just enter
     if entrance_count ~= 0 then
+        Indun_panel_enter_challenge(nil, nil, (indun_type == 1007) and 2 or 1, indun_type)
         return
     end
     if indun_type == 1004 then
@@ -4447,6 +4453,31 @@ function Indun_panel_process_ticket(indun_type, mode, config)
     --            무기한 티켓은 아껴 둔다(원래 전략)
     -- the old tier spends what you own first; the current tier buys while it can
     local use_owned_first = (indun_type == 1004)
+    -- 어느 상점이 그 등급을 파는가. 560 은 두 상점 다 판다 -> 누른 버튼(mode)이 정한다
+    --   540 = TOS 코인 320 / 560 = TOS 코인 322 · PVP 광산 40(용병단 증표)
+    local recipe_name = ""
+    if indun_type == 1004 then
+        recipe_name = "EVENT_TOS_WHOLE_SHOP_320"
+    elseif mode == "pvp" then
+        recipe_name = "PVP_MINE_40"
+    else
+        recipe_name = "EVENT_TOS_WHOLE_SHOP_322"
+    end
+    local function try_buy()
+        if Indun_panel_get_recipe_trade_count(recipe_name) >= 1 then
+            Indun_panel_item_buy_use(recipe_name)
+            Indun_panel_enter_reserve(enter_mode, indun_type)
+            return true
+        end
+        return false
+    end
+    -- Lv.560 의 용병단증표 버튼만 구매가 1순위다(2026-09-13). 증표는 주기마다 초기화되는
+    -- 재화라 살 수 있을 때 사는 것이 이득이고, 못 사면 그때 가진 티켓으로 내려간다.
+    -- TOS 코인 버튼과 540 은 그대로 둔다(코인은 값이 나가서 먼저 태우면 손해다)
+    local buy_first = (not use_owned_first) and mode == "pvp"
+    if buy_first and try_buy() then
+        return
+    end
     -- (1) 기간제부터. 놔두면 사라진다
     if Indun_panel_use_prioritized_ticket(config.expiring, enter_mode, indun_type) then
         return
@@ -4460,19 +4491,7 @@ function Indun_panel_process_ticket(indun_type, mode, config)
         Indun_panel_use_prioritized_ticket(config.tradable, enter_mode, indun_type) then
         return
     end
-    -- 어느 상점이 그 등급을 파는가. 560 은 두 상점 다 판다 -> 누른 버튼(mode)이 정한다
-    --   540 = TOS 코인 320 / 560 = TOS 코인 322 · PVP 광산 40
-    local recipe_name = ""
-    if indun_type == 1004 then
-        recipe_name = "EVENT_TOS_WHOLE_SHOP_320"
-    elseif mode == "pvp" then
-        recipe_name = "PVP_MINE_40"
-    else
-        recipe_name = "EVENT_TOS_WHOLE_SHOP_322"
-    end
-    if Indun_panel_get_recipe_trade_count(recipe_name) >= 1 then
-        Indun_panel_item_buy_use(recipe_name)
-        Indun_panel_enter_reserve(enter_mode, indun_type)
+    if (not buy_first) and try_buy() then
         return
     end
     -- (4) Lv.560 은 못 샀을 때만 거래 가능한 무기한을 꺼낸다
@@ -4655,7 +4674,10 @@ end
 
 function Indun_panel_item_use_sin(frame, ctrl, mode, indun_type)
     local ent_count = Indun_panel_get_entrance_count(indun_type, 4)
+    -- 챌린지와 같은 이유로 그냥 입장시킨다(예전에는 반응이 없었다).
+    -- 분열은 좌클릭 하나뿐이라 파티/솔로 구분이 없다
     if tonumber(ent_count) > 0 then
+        Indun_panel_enter_singularity(nil, nil, "", indun_type)
         return
     end
     local config = SINGULARITY_CONFIG[indun_type]
@@ -4665,8 +4687,14 @@ function Indun_panel_item_use_sin(frame, ctrl, mode, indun_type)
     if Indun_panel_try_use_ticket_list(config.expiring, indun_type) then
         return
     end
-    -- 거래불가 무기한은 팔 수 없으니 구매보다 먼저 쓴다
+    -- 챌린지와 같은 규칙: Lv.540(2001)은 지난 등급이라 가진 티켓을 먼저 쓴다
+    -- (Lv.560 은 구매 횟수가 기간마다 초기화되므로 살 수 있을 때 사고 무기한을 아낀다)
+    -- 거래불가 무기한은 팔 수 없으니 구매보다 먼저 쓴다(등급과 무관)
     if Indun_panel_try_use_ticket_list(config.no_trade, indun_type) then
+        return
+    end
+    -- Lv.540 은 지난 등급이라 거래 가능한 것까지 다 쓰고 나서 산다
+    if indun_type == 2001 and Indun_panel_try_use_ticket_list(config.tradable, indun_type) then
         return
     end
     -- 540(낮은 칸) 버튼은 mode 문자열을 넘기지 않는다(원본 그대로) -> 그 경우도 TOS 로 본다
@@ -4689,8 +4717,8 @@ function Indun_panel_item_use_sin(frame, ctrl, mode, indun_type)
             return
         end
     end
-    -- 거래 가능한 무기한은 마지막에(값이 나가는 물건이라 아낀다)
-    if Indun_panel_try_use_ticket_list(config.tradable, indun_type) then
+    -- Lv.560 은 못 샀을 때만 거래 가능한 무기한을 꺼낸다(값이 나가는 물건이라 아낀다)
+    if indun_type ~= 2001 and Indun_panel_try_use_ticket_list(config.tradable, indun_type) then
         return
     end
 end
@@ -4869,14 +4897,13 @@ end
 -- 🔑 인벤토리 개수만으로는 **무엇이 줄었는지** 보기 어렵다 — 버튼의 "보유 수량" 은 세 등급을
 --    합산한 값이라, 순서가 틀렸다는 것을 사용자가 확인할 방법이 없었다(2026-09-09 제보).
 -- tells you which grade was actually consumed; the button's count sums all three grades
+-- 🔑 v1.1.8 에는 여기서 "입장권 사용: <이름> (기간제)" 를 띄웠다. 버튼의 보유 수량이
+--    세 등급 **합계**라 무엇이 줄었는지 볼 수 없어서, 순서가 고쳐졌는지 확인할 방법이
+--    없었기 때문이다.
+-- 🔴 2026-09-12: 확인이 끝나자 매번 떠서 방해가 됐다(사용자 지적) → 뺐다.
+-- the "ticket used" notice existed only to make the fix verifiable; removed once confirmed
 local function Indun_panel_ticket_use(ticket_item, class_id)
     INV_ICON_USE(ticket_item)
-    local cls = GetClassByType("Item", class_id)
-    local name = cls ~= nil and TryGetProp(cls, "Name", "") or ""
-    local grades = g.lang == "Japanese" and {"期間制", "取引不可", "取引可能"} or
-                       {"expiring", "untradeable", "tradable"}
-    ui.SysMsg(string.format(g.lang == "Japanese" and "入場券使用: %s (%s)" or "Ticket used: %s (%s)",
-        tostring(name), tostring(grades[Indun_panel_ticket_rank(class_id)])))
 end
 
 function Indun_panel_raid_itemuse(indun_panel, ctrl, str, indun_type)
