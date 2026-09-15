@@ -56,12 +56,13 @@
 -- 1.1.8 "IP: the raid auto-match / sweep ticket button now spends an expiring ticket first. It used to take whichever ticket came first in an internal table, and the three rows added for the newer raids (Zmei, False Radiance, Fallen Judgment) list their ids in ascending order, which happens to be tradable -> untradeable -> 7-day. So a tradable ticket was burned while a timed one sat in the bag expiring; the older raids listed the timed id first and were fine by accident. The choice now reads the item class - LifeTime for a timed ticket, MarketTrade for an untradeable one - so the order is expiring, then untradeable, then tradable regardless of how the table is written, and it keeps working for raids added later. The button also reports which ticket it consumed, since its count is the sum of all three grades. Boss Direction: the frame layer label had its language test inverted, so every non-Japanese client saw Japanese"
 -- 1.1.9 "IP: the dungeon panel now enters when you still have entries left, instead of doing nothing. The challenge and singularity ticket buttons bailed out early whenever an entry was still available - which is correct for not wasting a ticket, but their own tooltip already promised 'Left Click: PT Entry / Right Click: Solo Entry', so a click that did nothing read as a broken button. They now enter directly, and party or solo is decided by the dungeon id the button already passes (1007 party, 1006 solo, 1004 for the Lv.540 row). Singularity has a single click and no party split. Two ticket-order fixes ride along: the Lv.560 singularity ticket flow was missing the tier split the challenge flow has, so it spent a tradable permanent ticket before buying - Lv.540 now spends what it holds first and Lv.560 keeps the tradable one for last, matching the challenge rule; and the Lv.560 challenge mercenary-badge button now buys first, since that currency resets each period so buying while the allowance lasts is the better trade, while the TOS-coin button and every Lv.540 path are unchanged. The 'Ticket used' notice added in 1.1.8 is gone - it existed only to make the ordering verifiable and became noise once confirmed"
 -- 1.2.0 "IP: clicking the Lv.540 Singularity entry button now agrees to understaffed entry for you, so the queue starts as soon as the minimum of two players is reached instead of waiting for a full party. Only the Lv.540 tier does this - Lv.560 is untouched, since entering short-handed there costs you an entry you would rather spend on a full run. The agreement cannot be sent at click time: the server is what starts auto-matching, and the client itself refuses the request while AUTOMATCH_MODE is not YES. So the panel leaves a mark and a hook on INDUNENTER_AUTOMATCH_TYPE spends it once matching has actually begun, which also means the mark only covers the entry you started from the panel - a match you queue from the game's own dungeon window is left alone. The mark expires after fifteen seconds so a queue that never starts cannot leak into a later one, and a system message reports the agreement, because understaffed entry cannot be taken back without cancelling the match. The checkbox lives in the panel settings under Other and is on by default. Uriel hard mode is now covered too: the party tier of False Radiance and Fallen Judgment - indun.ies 735 and 738, weekly once, five players, Lv.560 - opened in client revision 406613, so the H button on those two rows works and the character list gained their Hard columns. Both places had been written to expect it, guarding on the ids being absent, so a single line each was all that was missing; the list's settings version is bumped so the new columns are checked on by default for existing saves"
+-- 1.2.1 "QSO: the raid potion swap now covers the Uriel hard tier. Adding the party difficulty of False Radiance and Fallen Judgment to the dungeon panel in 1.2.0 left one thing behind - the table that maps a dungeon to a monster race, which is what decides the attack and defence potions a raid gets. It listed the auto-match and solo ids for both bosses but not the party ones, so entering on hard kept whatever potions were on the bar. Both are Paramune, the same race as their other two difficulties, so the fix is the two missing ids; every other raid already had all three"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.2.0"
+local ver = "1.2.1"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -23506,8 +23507,12 @@ end
 -- 733/734 = 거짓된 광휘, 736/737 = 타락한 심판 (EP18.2, 둘 다 RaceType=Paramune)
 -- 파티(Hard)는 아직 indun.ies 에 행이 없다 — 오픈되면 그 ID 도 여기 넣을 것
 g.quickslot_operate_raid_list = {
+    -- 한 보스의 Auto·Solo·Hard 를 전부 넣어야 한다 — 하나라도 빠지면 그 모드에서만 안 바뀐다.
+    -- 733/734/735 = 거짓된 광휘, 736/737/738 = 타락한 심판 (RaceType=Paramune,
+    -- monster.ies 의 71120 / 71123 으로 확인). 735/738 은 리비전 406613 에서 열린 파티(Hard)
+    -- every difficulty of a boss must be listed, or that one mode silently keeps the old potion
     Paramune = {623, 667, 666, 665, 674, 673, 675, 680, 679, 681, 707, 708, 710, 711, 709, 712, 722, 723, 724, 725, 726,
-                727, 733, 734, 736, 737},
+                727, 733, 734, 735, 736, 737, 738},
     Klaida = {686, 685, 687, 716, 717, 718},
     Velnias = {689, 688, 690, 669, 635, 628, 696, 695, 697},
     Forester = {672, 671, 670},

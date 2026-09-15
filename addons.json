@@ -26,10 +26,10 @@
     "name": "New Nexus Addons",
     "file": "new_nexus_addons",
     "extension": "ipf",
-    "fileVersion": "v1.2.0",
-    "releaseTag": "new_nexus_addons_v-1.2.0",
+    "fileVersion": "v1.2.1",
+    "releaseTag": "new_nexus_addons_v-1.2.1",
     "unicode": "⛄",
-    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.2.0: Lv.540 분열 입장 시 '4인 이하 입장'에 자동으로 동의합니다(Lv.540만, Lv.560은 그대로). 우리엘 하드(파티) 레이드를 인던 패널과 캐릭터별 인던 목록에 추가했습니다. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.2.0: Lv.540 Singularity now agrees to understaffed entry for you (Lv.540 only; Lv.560 is untouched). Added the Uriel hard (party) raids to the dungeon panel and the per-character dungeon list. <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.2.0: Lv.540分裂で「4人以下入場」に自動で同意します(Lv.540のみ・Lv.560はそのまま)。ウリエルのハード(パーティ)レイドをインダンパネルとキャラクター別インダン一覧に追加しました。",
+    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.2.1: Lv.540 분열 입장 시 '4인 이하 입장'에 자동으로 동의합니다(Lv.540만). 우리엘 하드(파티) 레이드를 인던 패널과 캐릭터별 인던 목록에 추가하고, 그 레이드에서도 물약을 자동으로 바꿔줍니다. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.2.1: Lv.540 Singularity now agrees to understaffed entry for you (Lv.540 only). Added the Uriel hard (party) raids to the dungeon panel and the per-character dungeon list, and the raid potion swap now covers them too. <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.2.1: Lv.540分裂で「4人以下入場」に自動で同意します(Lv.540のみ)。ウリエルのハード(パーティ)レイドをインダンパネルとキャラクター別インダン一覧に追加し、そのレイドでも薬を自動で切り替えます。",
     "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
   },
   {
