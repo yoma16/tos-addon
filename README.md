@@ -1,3 +1,22 @@
+> ## 📘 Native Lang (채팅·이름 자동 번역) — 설치 전에 설명서를 먼저 받으세요
+>
+> **설치 방법은 설명서에 전부 적혀 있습니다. 먼저 내려받아 읽은 뒤 설치해 주세요.**
+>
+> | 언어 | 설명서 | Manual |
+> |---|---|---|
+> | 🇰🇷 한국어 | **[README_KR.txt](README_KR.txt)** | 설치·DeepL 키 발급·문제 해결 |
+> | 🇺🇸 English | **[README_EN.txt](README_EN.txt)** | Setup, DeepL key, troubleshooting |
+> | 🇯🇵 日本語 | **[README_JP.txt](README_JP.txt)** | 導入・DeepLキー・トラブル対応 |
+>
+> 애드온 본체(`.ipf`)와 번역 엔진(`.exe`)은
+> **[Releases 페이지](https://github.com/yoma16/tos-addon/releases)** 에서 받으세요.
+> 두 파일을 **모두** 넣어야 동작합니다.
+>
+> ⚠️ 번역 품질을 위해 **DeepL 무료 API 키**(월 100만 자) 사용을 권장합니다.
+> 키가 없으면 Google 번역으로 동작하지만, Google 무료 번역은 요청이 많은 IP를 차단합니다.
+
+---
+
 # Cupole Manager
 
 Tree of Savior용 **Cupole 프리셋/자동 소환 애드온**입니다.  
