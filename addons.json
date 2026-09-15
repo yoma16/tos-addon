@@ -64,5 +64,16 @@
     "unicode": "⛄",
     "description": "편의 설정 HUD. 자주 바꾸는 설정 5가지(다른 캐릭터 이펙트 보기, 큐폴 자동 물약, 내 이펙트·다른 캐릭터·보스 몬스터 선명도)를 설정창을 열지 않고 화면에서 바로 전환합니다. HUD는 드래그로 옮기면 위치가 저장됩니다.<br> v1.0.0: 값을 저장하지 않고 패널을 열 때마다 클라이언트의 현재 값을 읽어 보여줍니다. 다른 애드온도 같은 설정을 건드리기 때문에, 사본을 들고 있다가 다시 적용하면 서로 덮어쓰게 되기 때문입니다. 선명도는 10/25/50/75/100% 다섯 단계이고 지금 값과 정확히 같을 때만 강조 표시합니다.<br> Convenient HUD. Flip five frequently-changed settings in place — other players' effects, cupole auto potion, and the clarity of your own, other players' and boss effects — without opening the option window. Drag the bar to move it and the position is saved.<br> v1.0.0: nothing is stored. The panel reads the client's live values every time it opens, because other addons write the same settings and a private copy would just fight over who writes last. Clarity has five steps (10/25/50/75/100%) and a step is highlighted only when it matches the current value exactly.<br> 便利設定HUD。よく変える設定5つ(他キャラのエフェクト表示、クポル自動ポーション、自分・他キャラ・ボスモンスターのエフェクト鮮明度)を設定ウィンドウを開かずにその場で切り替えます。HUDはドラッグで移動でき位置が保存されます。<br> v1.0.0: 値は保存せず、パネルを開くたびにクライアントの現在値を読んで表示します。他のアドオンも同じ設定を書き換えるため、コピーを持って再適用すると上書き合戦になるからです。鮮明度は10/25/50/75/100%の5段階で、現在値と完全に一致する時だけ強調表示します。",
     "tags": ["yomae", "convenient_hud", "option", "effect", "yoma16", "요매", "편의"]
+  },
+  {
+    "tosversion": "20260916",
+    "name": "New Native Lang",
+    "file": "native_lang",
+    "extension": "ipf",
+    "fileVersion": "v1.1.5",
+    "releaseTag": "new_native_lang_v1.1.5-exe0.0.7",
+    "unicode": "⛄",
+    "description": "norisan의 채팅·캐릭터명 자동 번역 애드온 yomae 포크. ⚠️ 별도 번역 엔진 native_lang-v0.0.7.exe 를 Releases에서 받아 addons/native_lang 폴더에 넣어야 동작합니다. 설치 방법은 저장소 루트의 README_KR.txt 를 보세요. <br>v1.1.5: DeepL 지원(무료 API 키, 월 100만 자). 한국어 Windows에서 번역 엔진이 시작하자마자 죽던 문제를 고쳤습니다. 채팅 여러 줄을 한 번에 번역해 훨씬 빨라졌습니다. 키가 없으면 Google 번역으로 동작합니다. <br>yomae fork of norisan's chat and character-name auto translator. ⚠️ It also needs the separate engine native_lang-v0.0.7.exe from Releases, placed in the addons/native_lang folder. See README_EN.txt in the repository root for setup. <br>v1.1.5: DeepL support (free API key, 1M characters a month). Fixed the engine dying immediately on Korean Windows. Chat lines are now translated in one batch, which is much faster. Without a key it falls back to Google Translate. <br>norisanのチャット・キャラクター名自動翻訳アドオンのyomaeフォーク。⚠️ 別途、翻訳エンジン native_lang-v0.0.7.exe をReleasesから入手し addons/native_lang フォルダに置く必要があります。導入方法はリポジトリ直下の README_JP.txt をご覧ください。<br>v1.1.5: DeepL対応(無料APIキー、月100万文字)。韓国語版Windowsで翻訳エンジンが起動直後に落ちる問題を修正。チャットを一括翻訳するようになり大幅に速くなりました。キーがない場合はGoogle翻訳で動作します。",
+    "tags": ["yomae", "native lang", "new native lang", "translate", "deepl", "yoma16", "요매", "번역"]
   }
 ]
