@@ -55,12 +55,13 @@
 -- 1.1.7 "IP: the Sanctuary of Resonance (Zawra) entry button no longer walks you straight in. That dungeon makes you pick an entry step - indun_step.ies lists ten of them and you choose up to the one you have unlocked - but the panel called the plain solo auto-enter, so the step choice was skipped entirely. The button now opens the game's own step-selection window, the same one the in-game Enter button opens, and you press enter there. The check reads DungeonType off the dungeon class instead of hardcoding id 732, so further Sanctuary bosses are covered as they are added, and on a client without that window it falls back to the plain entry dialog rather than to the auto enter"
 -- 1.1.8 "IP: the raid auto-match / sweep ticket button now spends an expiring ticket first. It used to take whichever ticket came first in an internal table, and the three rows added for the newer raids (Zmei, False Radiance, Fallen Judgment) list their ids in ascending order, which happens to be tradable -> untradeable -> 7-day. So a tradable ticket was burned while a timed one sat in the bag expiring; the older raids listed the timed id first and were fine by accident. The choice now reads the item class - LifeTime for a timed ticket, MarketTrade for an untradeable one - so the order is expiring, then untradeable, then tradable regardless of how the table is written, and it keeps working for raids added later. The button also reports which ticket it consumed, since its count is the sum of all three grades. Boss Direction: the frame layer label had its language test inverted, so every non-Japanese client saw Japanese"
 -- 1.1.9 "IP: the dungeon panel now enters when you still have entries left, instead of doing nothing. The challenge and singularity ticket buttons bailed out early whenever an entry was still available - which is correct for not wasting a ticket, but their own tooltip already promised 'Left Click: PT Entry / Right Click: Solo Entry', so a click that did nothing read as a broken button. They now enter directly, and party or solo is decided by the dungeon id the button already passes (1007 party, 1006 solo, 1004 for the Lv.540 row). Singularity has a single click and no party split. Two ticket-order fixes ride along: the Lv.560 singularity ticket flow was missing the tier split the challenge flow has, so it spent a tradable permanent ticket before buying - Lv.540 now spends what it holds first and Lv.560 keeps the tradable one for last, matching the challenge rule; and the Lv.560 challenge mercenary-badge button now buys first, since that currency resets each period so buying while the allowance lasts is the better trade, while the TOS-coin button and every Lv.540 path are unchanged. The 'Ticket used' notice added in 1.1.8 is gone - it existed only to make the ordering verifiable and became noise once confirmed"
+-- 1.2.0 "IP: clicking the Lv.540 Singularity entry button now agrees to understaffed entry for you, so the queue starts as soon as the minimum of two players is reached instead of waiting for a full party. Only the Lv.540 tier does this - Lv.560 is untouched, since entering short-handed there costs you an entry you would rather spend on a full run. The agreement cannot be sent at click time: the server is what starts auto-matching, and the client itself refuses the request while AUTOMATCH_MODE is not YES. So the panel leaves a mark and a hook on INDUNENTER_AUTOMATCH_TYPE spends it once matching has actually begun, which also means the mark only covers the entry you started from the panel - a match you queue from the game's own dungeon window is left alone. The mark expires after fifteen seconds so a queue that never starts cannot leak into a later one, and a system message reports the agreement, because understaffed entry cannot be taken back without cancelling the match. The checkbox lives in the panel settings under Other and is on by default. Uriel hard mode is now covered too: the party tier of False Radiance and Fallen Judgment - indun.ies 735 and 738, weekly once, five players, Lv.560 - opened in client revision 406613, so the H button on those two rows works and the character list gained their Hard columns. Both places had been written to expect it, guarding on the ids being absent, so a single line each was all that was missing; the list's settings version is bumped so the new columns are checked on by default for existing saves"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.1.9"
+local ver = "1.2.0"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -2635,11 +2636,12 @@ local induns = {{
     }
 }, {
     -- EP18.2 신규 레이드 2종 (2026-09-01 패치, indun.ies 733/734/736/737).
-    -- 파티(Hard)는 넣지 않는다 — 아직 오픈 전이라 indun.ies 에 행 자체가 없다(735/738 없음).
-    -- 오픈되면 h = <새 ID> 한 줄만 추가하면 된다.
+    -- 파티(Hard) 735/738 은 리비전 406613 에서 열렸다(406485 까지는 indun.ies 에 행이 없었다).
+    -- 주간 1회 · 5인 · Lv.560 · 기어스코어 38000
     -- ac = 자동 소탕 카운트 버프(buff.ies). 거짓된 광휘 80049 / 타락한 심판 80051
-    -- hard mode is not in indun.ies yet; add `h` when it opens
+    -- the party (Hard) tier opened in revision 406613
     light_uriel = {
+        h = 735,
         s = 734,
         a = 733,
         ac = 80049,
@@ -2648,6 +2650,7 @@ local induns = {{
     }
 }, {
     dark_uriel = {
+        h = 738,
         s = 737,
         a = 736,
         ac = 80051,
@@ -2875,6 +2878,7 @@ function Indun_panel_load_settings()
                 challenge_ticket = "month",
                 always_open = 0,
                 singularity_check = 0,
+                sin_understaff_540 = 1,
                 skin_name = IP_SKIN_DEFAULT,
                 en_ver = 0,
                 x = 665,
@@ -2973,6 +2977,12 @@ function Indun_panel_load_settings()
         end
         settings.etc.skin_migrated = 1
     end
+    -- 4인 이하 자동 동의는 나중에 생긴 키다. 기존 설정 파일에는 없으므로 여기서 채운다.
+    -- Indun_panel_ischecked 는 **키가 있을 때만** 저장한다 → 안 채우면 체크해도 조용히 무시된다
+    -- fill in the newer key: the checkbox handler only saves keys that already exist
+    if settings.etc.sin_understaff_540 == nil then
+        settings.etc.sin_understaff_540 = 1
+    end
     g.indun_panel_settings = settings
     Indun_panel_save_settings()
 end
@@ -2998,6 +3008,7 @@ function indun_panel_on_init()
         Indun_panel_frame_init()
     end
     g.setup_hook_and_event(g.addon, "INDUN_ALREADY_PLAYING", "Indun_panel_INDUN_ALREADY_PLAYING", false)
+    g.setup_hook(Indun_panel_INDUNENTER_AUTOMATCH_TYPE, "INDUNENTER_AUTOMATCH_TYPE")
 end
 
 function Indun_panel_earthtowershop_close(earthtowershop)
@@ -3763,6 +3774,10 @@ function Indun_panel_setting_frame_open() -- Indun_list_viewer_save_current_char
         name = "shading",
         jp = "チェックすると網掛け表示",
         en = "Check to display shading"
+    }, {
+        name = "sin_understaff_540",
+        jp = "540分裂: 4人以下入場に自動同意",
+        en = "540 Singularity: auto-allow understaffed entry"
     }}
     local check_y = line2_y + IP_BTN_GAP + ip_s(5)
     local check_pitch = ip_s(35)
@@ -4777,9 +4792,76 @@ function Indun_panel_enter_singularity(frame, ctrl, str, indun_type)
             end
         end
         if g.indun_panel_settings.etc.singularity_check == 0 then
+            -- 4인 이하 자동 동의는 **540 분열(2001)만** 건다.
+            -- 자동매칭은 서버가 걸어 주므로 여기서 바로 요청하면 이르다 → 표식만 남기고
+            -- INDUNENTER_AUTOMATCH_TYPE 훅이 매칭 시작을 확인한 뒤 소비한다
+            -- only the 540 tier opts in; the hook consumes this mark once matching really starts
+            g.indun_panel_understaff_req = nil
+            if indun_type == 2001 and g.indun_panel_settings.etc.sin_understaff_540 == 1 then
+                g.indun_panel_understaff_req = {
+                    indun_type = indun_type,
+                    time = os.time()
+                }
+            end
             ReserveScript(string.format("ReqMoveToIndun(%d,%d)", 2, 0), 0.3)
         end
     end
+end
+
+-- 자동매칭이 시작되면 엔진이 이 함수를 부른다(창을 열 때도 indun_type 0 으로 한 번 온다).
+-- 훅 안에서 엔진을 다시 부르지 않는다 → 실제 요청은 ReserveScript 로 떼어낸다
+-- the engine calls this when matching starts; the request itself is deferred out of the hook
+function Indun_panel_INDUNENTER_AUTOMATCH_TYPE(indun_type, need_understaff_allow)
+    if g.FUNCS and g.FUNCS["INDUNENTER_AUTOMATCH_TYPE"] then
+        g.FUNCS["INDUNENTER_AUTOMATCH_TYPE"](indun_type, need_understaff_allow)
+    end
+    local req = g.indun_panel_understaff_req
+    if req == nil or req.indun_type ~= indun_type then
+        return
+    end
+    g.indun_panel_understaff_req = nil
+    -- 표식이 오래됐으면 버린다(매칭이 안 걸렸거나 다른 경로로 들어왔다는 뜻이다)
+    -- a stale mark means matching never started, or we got here some other way
+    if os.time() - req.time > 15 then
+        return
+    end
+    -- 0 = 이미 동의했거나 이 인던에는 4인 이하 입장이 없다
+    if need_understaff_allow == 0 then
+        return
+    end
+    ReserveScript("Indun_panel_understaff_allow()", 0.5)
+end
+
+-- "4인 이하 입장" 동의. 클라 INDUNENTER_REQ_UNDERSTAFF_ENTER_ALLOW 의 판정을 그대로 따르되
+-- 확인 창(MsgBox)만 건너뛴다 / same guards as the client's own button, minus the confirm box
+function Indun_panel_understaff_allow()
+    local indunenter = ui.GetFrame("indunenter")
+    if indunenter == nil then
+        return
+    end
+    -- 파티 매칭(WITHMATCH)은 요청 함수가 다르고 패널은 그 경로를 쓰지 않는다 → 건드리지 않는다
+    -- party matching needs a different request; the panel never takes that path
+    if indunenter:GetUserValue('AUTOMATCH_MODE') ~= 'YES' then
+        return
+    end
+    local indun_type = indunenter:GetUserIValue('INDUN_TYPE')
+    local indun_cls = GetClassByType('Indun', indun_type)
+    if indun_cls == nil then
+        return
+    end
+    if TryGetProp(indun_cls, 'EnableUnderStaffEnter', 'NO') ~= 'YES' then
+        return
+    end
+    local min_member = TryGetProp(indun_cls, 'UnderstaffEnterAllowMinMember')
+    if min_member == nil then
+        return
+    end
+    ReqUnderstaffEnterAllowMode()
+    INDUNENTER_INIT_MY_INFO(indunenter, 'YES')
+    INDUNENTER_UNDERSTAFF_BTN_ENABLE(indunenter, 0)
+    ui.SysMsg(g.lang == "Japanese" and
+        string.format("540分裂: 最小%d人マッチング(4人以下入場)に自動で同意しました", min_member) or
+        string.format("540 Singularity: automatically allowed understaffed entry (min %d)", min_member))
 end
 
 -- 레이드 입장권 표. **여기 적힌 순서는 우선순위가 아니다** —
@@ -15626,12 +15708,12 @@ end
 g.ilv_RAID_KEYS = {"LU", "DU", "Z", "V", "L", "R", "N", "G", "M", "S", "U", "RO", "F", "P", "D"}
 g.ilv_RAID_INFO = {
     -- EP18.2 신규 레이드 2종 (indun.ies 733/734/736/737, 소탕 버프 80049/80051).
-    -- hard 를 넣지 않았다 — 파티(Hard)는 아직 오픈 전이라 indun.ies 에 행이 없다(735/738).
-    -- 표시·집계 코드가 전부 raid_info.hard 로 가드하므로 Hard 칸에서 자동으로 빠진다.
-    -- 오픈되면 hard = <새 ID> 한 줄만 넣으면 된다(ver 도 같이 올려야 체크박스가 생긴다)
-    -- no hard mode yet; every display path already guards on raid_info.hard
+    -- 파티(Hard) 735/738 은 리비전 406613 에서 열렸다 → hard 를 넣고 아래 ver 도 1.3 으로 올렸다
+    -- (ver 를 올려야 마이그레이션이 <이름>_H 표시 기본값을 채운다)
+    -- the party (Hard) tier opened in revision 406613; ver is bumped so the _H columns appear
     LU = {
         name = "LightUriel",
+        hard = 735,
         solo = 734,
         auto = 733,
         icon = "icon_item_misc_boss_LightUriel",
@@ -15639,6 +15721,7 @@ g.ilv_RAID_INFO = {
     },
     DU = {
         name = "DarkUriel",
+        hard = 738,
         solo = 737,
         auto = 736,
         icon = "icon_item_misc_boss_DarkUriel",
@@ -15762,8 +15845,9 @@ function Indun_list_viewer_load_settings()
     -- 아래 마이그레이션(표시 기본값 채우기)은 ver 가 올라갈 때만 돈다.
     -- 레이드를 추가하면 반드시 같이 올릴 것 — 안 올리면 기존 사용자의 저장본에 새 칸이 없어
     -- 체크박스가 꺼진 채로 남는다. 1.2 = EP18.2 우리엘 2종 추가
+    -- 1.3 = 우리엘 하드(파티) 735/738 추가 — 리비전 406613 에서 열렸다
     -- bump this whenever a raid is added, or existing saves keep the new rows unchecked
-    local ver = 1.2
+    local ver = 1.3
     if not settings then
         settings = g.load_json(json_path)
         if settings then
