@@ -7,3 +7,12 @@ codex*.log
 .gitignore
 ipf_unpack.exe
 client
+# new_native_lang — 배포물과 게임에서 나온 데이터는 커밋하지 않는다
+# never commit the binaries or in-game data:
+# logs/ contains OTHER PLAYERS' character names and guild chat
+new_native_lang/logs/
+new_native_lang/etc/
+new_native_lang/_send_to_friend/
+new_native_lang/*.exe
+new_native_lang/*.tar
+new_native_lang/*.ipf
