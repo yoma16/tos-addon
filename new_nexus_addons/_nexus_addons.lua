@@ -57,12 +57,13 @@
 -- 1.1.9 "IP: the dungeon panel now enters when you still have entries left, instead of doing nothing. The challenge and singularity ticket buttons bailed out early whenever an entry was still available - which is correct for not wasting a ticket, but their own tooltip already promised 'Left Click: PT Entry / Right Click: Solo Entry', so a click that did nothing read as a broken button. They now enter directly, and party or solo is decided by the dungeon id the button already passes (1007 party, 1006 solo, 1004 for the Lv.540 row). Singularity has a single click and no party split. Two ticket-order fixes ride along: the Lv.560 singularity ticket flow was missing the tier split the challenge flow has, so it spent a tradable permanent ticket before buying - Lv.540 now spends what it holds first and Lv.560 keeps the tradable one for last, matching the challenge rule; and the Lv.560 challenge mercenary-badge button now buys first, since that currency resets each period so buying while the allowance lasts is the better trade, while the TOS-coin button and every Lv.540 path are unchanged. The 'Ticket used' notice added in 1.1.8 is gone - it existed only to make the ordering verifiable and became noise once confirmed"
 -- 1.2.0 "IP: clicking the Lv.540 Singularity entry button now agrees to understaffed entry for you, so the queue starts as soon as the minimum of two players is reached instead of waiting for a full party. Only the Lv.540 tier does this - Lv.560 is untouched, since entering short-handed there costs you an entry you would rather spend on a full run. The agreement cannot be sent at click time: the server is what starts auto-matching, and the client itself refuses the request while AUTOMATCH_MODE is not YES. So the panel leaves a mark and a hook on INDUNENTER_AUTOMATCH_TYPE spends it once matching has actually begun, which also means the mark only covers the entry you started from the panel - a match you queue from the game's own dungeon window is left alone. The mark expires after fifteen seconds so a queue that never starts cannot leak into a later one, and a system message reports the agreement, because understaffed entry cannot be taken back without cancelling the match. The checkbox lives in the panel settings under Other and is on by default. Uriel hard mode is now covered too: the party tier of False Radiance and Fallen Judgment - indun.ies 735 and 738, weekly once, five players, Lv.560 - opened in client revision 406613, so the H button on those two rows works and the character list gained their Hard columns. Both places had been written to expect it, guarding on the ids being absent, so a single line each was all that was missing; the list's settings version is bumped so the new columns are checked on by default for existing saves"
 -- 1.2.1 "QSO: the raid potion swap now covers the Uriel hard tier. Adding the party difficulty of False Radiance and Fallen Judgment to the dungeon panel in 1.2.0 left one thing behind - the table that maps a dungeon to a monster race, which is what decides the attack and defence potions a raid gets. It listed the auto-match and solo ids for both bosses but not the party ones, so entering on hard kept whatever potions were on the bar. Both are Paramune, the same race as their other two difficulties, so the fix is the two missing ids; every other raid already had all three"
+-- 1.2.2 "IP: the Lv.560 challenge ticket buttons spend what you already hold before buying. 1.1.9 made the mercenary-badge button buy first, reasoning that the badge allowance resets each period - but an expiring ticket is lost if it is not used, so a timed ticket sat in the bag expiring while a new one was bought. Both Lv.560 buttons now follow the same order: expiring, then untradeable, then buy, then tradable permanent. The Lv.540 row is unchanged. Both tooltips were rewritten to match - the TOS-coin one had been missing the untradeable step, and its English text showed the mercenary-badge icon in place of the coin"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.2.1"
+local ver = "1.2.2"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -4413,8 +4414,8 @@ function Indun_panel_challenge_frame(indun_panel, key, sub_key, indun_type, y, x
         ip_f(16), "icon_item_Tos_Event_Coin", ip_s(15), ip_s(15),
         Indun_panel_get_recipe_trade_count("EVENT_TOS_WHOLE_SHOP_322") or 0)
     local tooltip_high_tos = g.lang == "Japanese" and
-                                 IP_TIP_OL .. "左クリック: PT入場{nl}右クリック: ソロ入場{nl}優先順位{nl}1.期限付き{nl}2.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います){nl}3.期限なし" or
-                                 IP_TIP_OL .. "Left Click: PT Entry{nl}Right Click: Solo Entry{nl}Priority{nl}1.Expiring{nl}2.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}3.Non-expiring"
+                                 IP_TIP_OL .. "左クリック: PT入場{nl}右クリック: ソロ入場{nl}優先順位{nl}1.期限付き{nl}2.取引不可{nl}3.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います){nl}4.期限なし" or
+                                 IP_TIP_OL .. "Left Click: PT Entry{nl}Right Click: Solo Entry{nl}Priority{nl}1.Expiring{nl}2.Untradable{nl}3.{img icon_item_Tos_Event_Coin 20 20}tickets(buy and use){nl}4.Non-expiring"
     buyuse_high_tos:SetText(text_high_tos)
     buyuse_high_tos:SetTextTooltip(icon_text_high .. tooltip_high_tos)
     buyuse_high_tos:SetEventScript(ui.LBUTTONUP, "Indun_panel_challenge_item_use")
@@ -4428,10 +4429,10 @@ function Indun_panel_challenge_frame(indun_panel, key, sub_key, indun_type, y, x
     AUTO_CAST(buyuse_high_pvp)
     local text_high_pvp = string.format("{ol}%s{#FFFFFF}USEor{img pvpmine_shop_btn_total %d %d}{#FFFFFF}%s", ip_f(16),
         ip_s(18), ip_s(18), Indun_panel_get_recipe_trade_count("PVP_MINE_40") or 0)
-    -- 이 버튼만 구매가 1순위다(2026-09-13). 툴팁과 동작이 어긋나면 안 되므로 같이 바꾼다
+    -- 두 560 버튼은 순서가 같다(기간제 -> 거래불가 -> 구매 -> 무기한). 다른 것은 어느 상점에서 사느냐뿐이다
     local tooltip_high_pvp = g.lang == "Japanese" and
-                                 IP_TIP_OL .. "左クリック: PT入場{nl}右クリック: ソロ入場{nl}優先順位{nl}1.{img pvpmine_shop_btn_total 20 20}チケット(買って使います){nl}2.期限付き{nl}3.期限なし" or
-                                 IP_TIP_OL .. "Left Click: PT Entry{nl}Right Click: Solo Entry{nl}Priority{nl}1.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}2.Expiring{nl}3.Non-expiring"
+                                 IP_TIP_OL .. "左クリック: PT入場{nl}右クリック: ソロ入場{nl}優先順位{nl}1.期限付き{nl}2.取引不可{nl}3.{img pvpmine_shop_btn_total 20 20}チケット(買って使います){nl}4.期限なし" or
+                                 IP_TIP_OL .. "Left Click: PT Entry{nl}Right Click: Solo Entry{nl}Priority{nl}1.Expiring{nl}2.Untradable{nl}3.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}4.Non-expiring"
     buyuse_high_pvp:SetText(text_high_pvp)
     buyuse_high_pvp:SetTextTooltip(icon_text_high .. tooltip_high_pvp)
     buyuse_high_pvp:SetEventScript(ui.LBUTTONUP, "Indun_panel_challenge_item_use")
@@ -4487,13 +4488,10 @@ function Indun_panel_process_ticket(indun_type, mode, config)
         end
         return false
     end
-    -- Lv.560 의 용병단증표 버튼만 구매가 1순위다(2026-09-13). 증표는 주기마다 초기화되는
-    -- 재화라 살 수 있을 때 사는 것이 이득이고, 못 사면 그때 가진 티켓으로 내려간다.
-    -- TOS 코인 버튼과 540 은 그대로 둔다(코인은 값이 나가서 먼저 태우면 손해다)
-    local buy_first = (not use_owned_first) and mode == "pvp"
-    if buy_first and try_buy() then
-        return
-    end
+    -- 2026-09-19 되돌림: 인벤에 있는 입장권이 언제나 구매보다 먼저다(사용자 지적 — 기간제가
+    -- 인벤에 있는데 새로 사서 그것을 썼다). 2026-09-13 에 용병단증표 버튼만 buy_first 로
+    -- 구매를 1순위에 올렸었는데, 기간제는 놔두면 사라지는 물건이라 아껴 봐야 손해다.
+    -- 순서를 바꿀 때는 두 560 버튼의 툴팁도 같이 고칠 것(이 창은 툴팁이 유일한 설명이다)
     -- (1) 기간제부터. 놔두면 사라진다
     if Indun_panel_use_prioritized_ticket(config.expiring, enter_mode, indun_type) then
         return
@@ -4507,7 +4505,7 @@ function Indun_panel_process_ticket(indun_type, mode, config)
         Indun_panel_use_prioritized_ticket(config.tradable, enter_mode, indun_type) then
         return
     end
-    if (not buy_first) and try_buy() then
+    if try_buy() then
         return
     end
     -- (4) Lv.560 은 못 샀을 때만 거래 가능한 무기한을 꺼낸다
