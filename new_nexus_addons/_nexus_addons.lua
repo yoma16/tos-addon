@@ -58,12 +58,13 @@
 -- 1.2.0 "IP: clicking the Lv.540 Singularity entry button now agrees to understaffed entry for you, so the queue starts as soon as the minimum of two players is reached instead of waiting for a full party. Only the Lv.540 tier does this - Lv.560 is untouched, since entering short-handed there costs you an entry you would rather spend on a full run. The agreement cannot be sent at click time: the server is what starts auto-matching, and the client itself refuses the request while AUTOMATCH_MODE is not YES. So the panel leaves a mark and a hook on INDUNENTER_AUTOMATCH_TYPE spends it once matching has actually begun, which also means the mark only covers the entry you started from the panel - a match you queue from the game's own dungeon window is left alone. The mark expires after fifteen seconds so a queue that never starts cannot leak into a later one, and a system message reports the agreement, because understaffed entry cannot be taken back without cancelling the match. The checkbox lives in the panel settings under Other and is on by default. Uriel hard mode is now covered too: the party tier of False Radiance and Fallen Judgment - indun.ies 735 and 738, weekly once, five players, Lv.560 - opened in client revision 406613, so the H button on those two rows works and the character list gained their Hard columns. Both places had been written to expect it, guarding on the ids being absent, so a single line each was all that was missing; the list's settings version is bumped so the new columns are checked on by default for existing saves"
 -- 1.2.1 "QSO: the raid potion swap now covers the Uriel hard tier. Adding the party difficulty of False Radiance and Fallen Judgment to the dungeon panel in 1.2.0 left one thing behind - the table that maps a dungeon to a monster race, which is what decides the attack and defence potions a raid gets. It listed the auto-match and solo ids for both bosses but not the party ones, so entering on hard kept whatever potions were on the bar. Both are Paramune, the same race as their other two difficulties, so the fix is the two missing ids; every other raid already had all three"
 -- 1.2.2 "IP: the Lv.560 challenge ticket buttons spend what you already hold before buying. 1.1.9 made the mercenary-badge button buy first, reasoning that the badge allowance resets each period - but an expiring ticket is lost if it is not used, so a timed ticket sat in the bag expiring while a new one was bought. Both Lv.560 buttons now follow the same order: expiring, then untradeable, then buy, then tradable permanent. The Lv.540 row is unchanged. Both tooltips were rewritten to match - the TOS-coin one had been missing the untradeable step, and its English text showed the mercenary-badge icon in place of the coin"
+-- 1.2.3 "IP: the Sanctuary of Resonance entry button now actually lets you in. Since 1.1.7 the step-selection window opened but pressing enter in it did nothing, because the panel drew the window itself without first telling the server which dungeon you were entering. The button now makes the same registration request the game uses, and the server opens the step window, so choosing a step and entering works"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.2.2"
+local ver = "1.2.3"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -5070,10 +5071,15 @@ end
 
 -- 입장 단계를 골라야 하는 인던. 자동으로 들여보내면 사용자가 단계를 고를 수 없다
 -- (공명의 성소: 자우라 — `indun_step.ies` 에 단계 1~10 이 있고 해금한 단계까지 고른다).
--- 게임의 "입장하기" 버튼도 자동 입장이 아니라 이 창을 띄운다:
---   indunInfo_button.ies 30행 DungeonType=SanctuartyResonance → RedButtonScp=REQ_ENTER_INDUNINFO
---   → shared_induninfo_button.on_click → SHOW_INDUNENTER_SELECT_STEP_DIALOG
---   (창 = addon.ipf/indunenter_select_step, EP18.2 에 추가됐다)
+-- 게임의 "입장하기" 버튼도 자동 입장이 아니라 단계 선택 창을 띄운다(창 = addon.ipf/indunenter_select_step).
+-- 🔴 **창을 직접 띄우면 안 된다 — 서버에 먼저 알려야 한다.** 입장 요청
+--    `ReqMoveToIndunSelectStep(방식, 배수, 단계)` 에는 인던 번호가 없다 → 서버는
+--    `ReqRaidAutoUIOpen(인던)` 으로 등록된 인던을 쓰고, 창도 서버가 그 응답으로 띄운다
+--    (SHOW_INDUNENTER_DIALOG / SHOW_INDUNENTER_SELECT_STEP_DIALOG 둘 다 클라 lua 호출부 0곳).
+--    v1.1.7 은 창만 직접 띄워서 "창은 뜨는데 입장이 안 되는" 상태였다
+--    (indunInfo_button.ies 30행 RESONANCE_ENTER 도 ActionType=ENTER — 레이드 자동매칭과 같은 부류)
+-- 🔴 never open the window ourselves: the enter request carries no dungeon id, so the server
+--    must be told first via ReqRaidAutoUIOpen, and it opens the step window in reply
 -- 🔑 **ID(732) 가 아니라 DungeonType 으로 본다** — 같은 종류의 인던이 추가되면 ID 목록은 깨진다
 --    (indun.ies 732: DungeonType=SanctuartyResonance, Difficulty=자우라 → 보스가 늘어날 자리다)
 -- dungeons that make you pick an entry step must not be auto-entered: open the game's own
@@ -5085,14 +5091,9 @@ local INDUN_STEP_SELECT_TYPES = {
 function Indun_panel_enter_solo(indun_panel, ctrl, str, indun_type)
     local step_cls = GetClassByType("Indun", indun_type)
     if step_cls and INDUN_STEP_SELECT_TYPES[TryGetProp(step_cls, "DungeonType", "None")] then
-        -- ⚠️ 이 창이 없는 옛 클라에서는 일반 입장창을 띄운다. 어느 쪽이든 **자동 입장은 안 한다**
-        -- on an older client without that window, fall back to the plain entry dialog - never
-        -- to the auto enter
-        if type(SHOW_INDUNENTER_SELECT_STEP_DIALOG) == "function" then
-            SHOW_INDUNENTER_SELECT_STEP_DIALOG(indun_type)
-        else
-            SHOW_INDUNENTER_DIALOG(indun_type)
-        end
+        -- 등록만 하고 ReqMoveToIndun 은 보내지 않는다 → 서버가 단계 선택 창을 띄우고 입장은 거기서
+        -- register only, no ReqMoveToIndun: the server opens the step window and the player enters there
+        ReqRaidAutoUIOpen(indun_type)
         return
     end
     local pcparty = session.party.GetPartyInfo()
