@@ -59,12 +59,13 @@
 -- 1.2.1 "QSO: the raid potion swap now covers the Uriel hard tier. Adding the party difficulty of False Radiance and Fallen Judgment to the dungeon panel in 1.2.0 left one thing behind - the table that maps a dungeon to a monster race, which is what decides the attack and defence potions a raid gets. It listed the auto-match and solo ids for both bosses but not the party ones, so entering on hard kept whatever potions were on the bar. Both are Paramune, the same race as their other two difficulties, so the fix is the two missing ids; every other raid already had all three"
 -- 1.2.2 "IP: the Lv.560 challenge ticket buttons spend what you already hold before buying. 1.1.9 made the mercenary-badge button buy first, reasoning that the badge allowance resets each period - but an expiring ticket is lost if it is not used, so a timed ticket sat in the bag expiring while a new one was bought. Both Lv.560 buttons now follow the same order: expiring, then untradeable, then buy, then tradable permanent. The Lv.540 row is unchanged. Both tooltips were rewritten to match - the TOS-coin one had been missing the untradeable step, and its English text showed the mercenary-badge icon in place of the coin"
 -- 1.2.3 "IP: the Sanctuary of Resonance entry button now actually lets you in. Since 1.1.7 the step-selection window opened but pressing enter in it did nothing, because the panel drew the window itself without first telling the server which dungeon you were entering. The button now makes the same registration request the game uses, and the server opens the step window, so choosing a step and entering works. CIS: items in the personal warehouse are now saved for the character item search. The save hook was registered under a misspelled name (a stray quote before WAREHOUSE_CLOSE), so closing the warehouse never saved anything and warehouse items could not be found"
+-- 1.2.4 "IP: new archaeology icon - left-click opens the relic shop from anywhere, right-click walks you to Archaeologist Airine (Klaipeda). Archeology Helper updated for the reworked archaeology (one region, four dig points, 70 detector uses): all seven distance messages now draw a coloured circle (the closest ones were ignored before), and the header shows tries used / max, points found and dig permits held"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.2.3"
+local ver = "1.2.4"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -2618,6 +2619,9 @@ local IP_SHORTCUTS = {
     {name = "market", img = "market_shortcut_btn02"},
     {name = "craft", img = "icon_fullscreen_menu_equipment_processing"},
     {name = "leticia", img = "icon_fullscreen_menu_letica"},
+    -- 고고학자 아이리네(클라페다). 패치 407247. 아이콘 = 발굴 주화 아이템 그림
+    -- Archaeologist Airine (Klaipeda), patch 407247; the icon is the dig-coin item
+    {name = "archeology", img = "icon_item_explorer_relic_coin"},
 }
 
 local induns = {{
@@ -2905,7 +2909,8 @@ function Indun_panel_load_settings()
                 pvp_mine = 1,
                 market = 1,
                 craft = 1,
-                leticia = 1
+                leticia = 1,
+                archeology = 1
             },
             set_names = {{
                 set_a = "SET A"
@@ -3457,6 +3462,18 @@ function Indun_panel_create_shortcut_button(indun_panel, key_name, x)
         tooltip_msg = g.lang == "Japanese" and IP_TIP_OL .. "レティーシャへ移動" or IP_TIP_OL .. "Leticia Move"
         btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_FULLSCREEN_NAVIGATION_MENU_DETAIL_MOVE_NPC")
         btn:SetEventScriptArgNumber(ui.LBUTTONUP, 309)
+    elseif key_name == "archeology" then
+        -- 좌클릭 = 유물 상점(어디서나), 우클릭 = 아이리네에게 이동(클라페다 안에서만)
+        -- left = relic shop anywhere, right = walk to Airine (in Klaipeda only)
+        btn = indun_panel:CreateOrGetControl("button", "archeology", x, IP_ICON_Y, IP_ICON, IP_ICON)
+        btn:SetText(string.format("{img icon_item_explorer_relic_coin %d %d}", IP_ICON, IP_ICON))
+        coin_count = GET_COMMAED_STRING(GET_TOTAL_ITEM_CNT(11039559)) -- Archeology_Dig_Coin(인벤 아이템)
+        tooltip_msg = (g.lang == "Japanese" and IP_TIP_OL .. "考古学遺物ショップ{nl}" or
+                          IP_TIP_OL .. "Archeology Relic Shop{nl}") .. "{#FFFF00}" .. coin_count .. "{/}{nl}" ..
+                          (g.lang == "Japanese" and "右クリック: 考古学者アイリーネへ移動(クラペダ)" or
+                              "Right-Click: Move to Archaeologist Airine (Klaipeda)")
+        btn:SetEventScript(ui.LBUTTONUP, "Indun_panel_archeology_shop_open")
+        btn:SetEventScript(ui.RBUTTONUP, "Indun_panel_archeology_npc_move")
     end
     if btn then
         AUTO_CAST(btn)
@@ -3514,6 +3531,35 @@ function Indun_panel_FULLSCREEN_NAVIGATION_MENU_DETAIL_MOVE_NPC(frame, ctrl, str
             end
         end
     end
+end
+
+-- 클라 OPEN_ARCHEOLOGY_SHOP(archeology_mission.lua) 과 같은 일. 원래 아이리네 대화에서 서버가 부른다
+-- same as the client OPEN_ARCHEOLOGY_SHOP, which the server calls from Airine dialog
+function Indun_panel_archeology_shop_open()
+    local frame = ui.GetFrame("earthtowershop")
+    if frame == nil then
+        return
+    end
+    frame:SetUserValue("SHOP_TYPE", "archeology_season2")
+    ui.OpenFrame("earthtowershop")
+end
+
+-- 레티샤 이동(내비 메뉴 309)과 같은 경로. 아이리네는 내비 메뉴 표에 없어서 값을 직접 넘긴다
+-- (대화 이름 = gentype_c_Klaipe.ies 의 Dialog 열 KLAPEDA_AIRINE)
+-- same path as the Leticia move; Airine has no navigation-menu row, so pass the values directly
+function Indun_panel_archeology_npc_move()
+    if g.get_map_type() ~= "City" then
+        ui.SysMsg(ScpArgMsg("ThisLocalUseNot"))
+        return
+    end
+    local pc = GetMyPCObject()
+    if session.world.IsIntegrateServer() == true or IsPVPField(pc) == 1 or IsPVPServer(pc) == 1 or
+        world.GetLayer() ~= 0 then
+        ui.SysMsg(ScpArgMsg("ThisLocalUseNot"))
+        return
+    end
+    FullScreenMenuMoveNpc(g.lang == "Japanese" and "考古学者アイリーネ" or "Archaeologist Airine", "NO", "c_Klaipe",
+        "KLAPEDA_AIRINE", "None", "YES")
 end
 
 function Indun_panel_earthtowershop_close_restart()
@@ -8021,6 +8067,64 @@ end
 -- tavern_of_soul ここまで
 
 -- archeology_helper ここから
+-- archeology_helper — 고고학 유물 탐사 보조 / archaeology survey helper
+-- 2026-10-07 신 고고학(패치 407247) 대응. 조사: .claude/docs/archeology-helper-rework-research.md
+--   · 의뢰 = 지역 1곳 · 지점 4곳 · 탐지 70회(+전시 효과). 진행 상태는 **계정 프로퍼티(서버 값)** 로 읽는다
+--   · 거리 문구 7단계를 ClMsg 키와 비교한다(언어 무관). 옛 JP/EN dicID 4단계는 보조로만 남긴다
+--   · 시작 = msg ARCHEOLOGY_MISSION_ACCEPT_RESULT(옛 _ARCHEOLOGY_MISSION_EXECUTE 훅은 실패에도 불렸다)
+--   · 로그: ../addons/_nexus_addons/archeology_log.txt — 거리·끝 문구, 흙더미, 탐지 횟수·상태 변화만
+--     (v0.99.8 진단 결과는 문서 "인게임 로그 결과" 절. 잡음이던 채팅 전체·대상 액터 기록은 v0.99.9 에서 뺐다)
+-- one region, four points, 70 tries per mission; progress comes from synced account properties
+local AH = {
+    LOG = "../addons/" .. addon_name_lower .. "/archeology_log.txt",
+    LOG_MAX = 600, -- 세션당 줄 수 상한 / lines per session
+    -- ✅ 신 "수상한 흙더미" 도 155003 dirt_heal_2 (2026-10-07 인게임 로그로 확인)
+    MOUND_TYPES = {[155003] = true},
+    -- 먼 것부터. size = 미니맵 원 지름(px) / far to near; size = circle diameter on the mini map
+    TIERS = {
+        {key = "ArcheologyRelicTooFarAway", size = 60, color = "FFFF0000"},
+        {key = "ArcheologyRelicVeryFarAway", size = 50, color = "FFFF5A00"},
+        {key = "ArcheologyRelicFarAway", size = 44, color = "FFFFA500"},
+        {key = "ArcheologyRelicSlightlyFarAway", size = 36, color = "FFFFD700"},
+        {key = "ArcheologyRelicNear", size = 28, color = "FFFFFF00"},
+        {key = "ArcheologyRelicVeryClose", size = 22, color = "FFFFFFFF"},
+        {key = "ArcheologyRelicImmediate", size = 18, color = "FF00FFFF"},
+    },
+    -- 옛 JP/EN 사전 ID → 단계 번호(ClMsg 비교가 실패할 때만) / legacy dicIDs, used only as a fallback
+    LEGACY = {
+        ["@dicID_^*$ETC_20220210_065695$*^"] = 1, ["@dicID_^*$ETC_20220210_065696$*^"] = 3,
+        ["@dicID_^*$ETC_20220210_065697$*^"] = 5, ["@dicID_^*$ETC_20220210_065699$*^"] = 6,
+        ["@dicID_^*$ETC_20220204_066856$*^"] = 1, ["@dicID_^*$ETC_20220204_066857$*^"] = 3,
+        ["@dicID_^*$ETC_20220204_066858$*^"] = 5, ["@dicID_^*$ETC_20220204_066860$*^"] = 6,
+    },
+    EXIT_KEYS = {"CantSurveyArcheologyCuzManyFail", "CantSurveyArcheologyCuzAllRecovery",
+        "AllAreaRelicFindedInThisArea"},
+    LEGACY_EXIT = {["@dicID_^*$ETC_20220210_065693$*^"] = true, ["@dicID_^*$ETC_20220204_066854$*^"] = true},
+    PERMIT_ID = 11039700, -- Archeology_Dig_Permit [고고학] 유물 탐사 허가증
+    STA_ITEM = 640009,
+}
+
+function Archeology_helper_t(kr, jp, en)
+    if g.lang == "kr" then
+        return kr
+    elseif g.lang == "Japanese" then
+        return jp
+    end
+    return en
+end
+
+function Archeology_helper_log(msg)
+    g.ah_log_n = (g.ah_log_n or 0) + 1
+    if g.ah_log_n > AH.LOG_MAX then
+        return
+    end
+    local f = io.open(AH.LOG, "a")
+    if f ~= nil then
+        f:write(string.format("[%s] %s\n", tostring(os.date("%m-%d %H:%M:%S")), tostring(msg)))
+        f:close()
+    end
+end
+
 function Archeology_helper_save_settings()
     g.save_json(g.aoh_settings_path, g.aoh_settings)
 end
@@ -8037,8 +8141,102 @@ function Archeology_helper_load_settings()
             y = 70
         }
     end
+    if type(settings.map_info) ~= "table" then
+        settings.map_info = {}
+    end
     g.aoh_settings = settings
     Archeology_helper_save_settings()
+end
+
+-- 서버 값으로 본 의뢰 상태 / mission state read from synced account properties
+-- (클라 worldmap2_archeology.lua 의 계산과 같다 / same maths as the client's archeology tab)
+function Archeology_helper_state()
+    local st = {maps = {}, used = 0, max = 70, points = 4, active = false, sig = ""}
+    local acc = GetMyAccountObj()
+    if acc == nil then
+        return st
+    end
+    st.used = tonumber(TryGetProp(acc, "archeology_try_count", 0)) or 0
+    local base, bonus = 70, 0
+    pcall(function()
+        base = shared_archeology.get_max_archeology_try_count()
+    end)
+    -- 전시 효과 계산은 가볍지 않다(대상 지정·채팅마다 불린다) → 30초 캐시
+    -- the exhibition bonus is not cheap and this runs per chat line / hover, so cache it for 30s
+    local now = imcTime.GetAppTime()
+    if g.ah_bonus == nil or not g.ah_bonus_at or now - g.ah_bonus_at > 30 then
+        g.ah_bonus = 0
+        pcall(function()
+            local opt = GET_CURRENT_APPLY_EFFECT_LIST() or {}
+            g.ah_bonus = math.max(0, math.floor(tonumber(opt.ARCHEOLOGY_SURVEY_ATTEMPT) or 0))
+        end)
+        g.ah_bonus_at = now
+    end
+    bonus = g.ah_bonus
+    st.max = (tonumber(base) or 70) + bonus
+    pcall(function()
+        st.points = shared_archeology.get_point_count(acc)
+    end)
+    local names = {}
+    for i = 1, (max_archeology_map_count or 3) do
+        local m = TryGetProp(acc, "archeology_map_" .. i, "None")
+        if m ~= "None" and m ~= "" and GetClass("Map", m) ~= nil then
+            local done = (tonumber(TryGetProp(acc, "archeology_map_" .. i .. "_complete", 0)) or 0) == 1
+            table.insert(st.maps, {name = m, done = done, idx = i})
+            table.insert(names, m)
+            if not done then
+                st.active = true
+            end
+        end
+    end
+    if st.used >= st.max then
+        st.active = false
+    end
+    st.sig = table.concat(names, ";")
+    return st
+end
+
+function Archeology_helper_in_mission_map(st)
+    st = st or Archeology_helper_state()
+    local cur = session.GetMapName()
+    for _, m in ipairs(st.maps) do
+        if m.name == cur then
+            return true
+        end
+    end
+    return false
+end
+
+-- 새 의뢰로 판단되면 마커·지점 수를 비운다 / clear markers and point counts for a new mission
+function Archeology_helper_reset_progress(st, reason)
+    g.aoh_settings.count = 0
+    g.aoh_settings.map_info = {}
+    g.aoh_settings.mission_sig = st.sig
+    g.aoh_settings.last_used = st.used
+    g.ah_dug = {}
+    Archeology_helper_log(string.format("reset (%s) maps=%s used=%d/%d", tostring(reason), st.sig, st.used, st.max))
+end
+
+-- 저장본과 서버 값을 맞춘다. 새 의뢰면 true / sync the saved state with the server; true on a new mission
+-- 🔑 지역이 바뀌었거나 쓴 횟수가 줄었으면 새 의뢰다(수락 메시지를 놓쳐도 맞춰진다)
+function Archeology_helper_sync(st)
+    local s = g.aoh_settings
+    local is_new = false
+    if st.sig ~= "" and (s.mission_sig ~= st.sig or st.used < (tonumber(s.last_used) or 0)) then
+        Archeology_helper_reset_progress(st, "server state changed")
+        is_new = true
+    end
+    if s.last_used ~= st.used then
+        Archeology_helper_log(string.format("try used=%d/%d active=%s", st.used, st.max, tostring(st.active)))
+        s.last_used = st.used
+    end
+    if s.is_archeology ~= st.active then
+        Archeology_helper_log("active -> " .. tostring(st.active))
+        s.is_archeology = st.active
+        -- 진행 중이 되면 펼치고, 끝나면 접는다 / open on start, fold on end
+        g.aoh_display = st.active and 0 or 1
+    end
+    return is_new
 end
 
 function archeology_helper_on_init()
@@ -8059,39 +8257,45 @@ function archeology_helper_on_init()
         ui.DestroyFrame(addon_name_lower .. "au_map")
         return
     end
+    g.ah_dug = {}
     Archeology_helper_start()
-    g.setup_hook_and_event(g.addon, "_ARCHEOLOGY_MISSION_EXECUTE", "Archeology_helper_ARCHEOLOGY_MISSION_EXECUTE", true)
     g.setup_hook_and_event(g.addon, "TARGETSPACE_PRECHECK", "Archeology_helper_TARGETSPACE_PRECHECK", true)
 end
 
 function Archeology_helper_start()
     if g.get_map_type() == "City" and g.aoh_settings[g.cid].sta_check == 1 then
-        local inv_item = session.GetInvItemByType(640009)
+        local inv_item = session.GetInvItemByType(AH.STA_ITEM)
         if inv_item then
             if inv_item.count <= 10 then
-                local msg = g.lang == "Japanese" and "スタミナ錠が残り少ないです" or
-                                "Stamina pills are running low"
+                local msg = Archeology_helper_t("스태미나 알약이 얼마 남지 않았습니다", "スタミナ錠が残り少ないです",
+                    "Stamina pills are running low")
                 imcAddOn.BroadMsg("NOTICE_Dm_!", msg, 10)
             end
         end
     end
     g.addon:RegisterMsg("MAP_CHARACTER_UPDATE", "Archeology_helper_MAP_CHARACTER_UPDATE")
+    g.addon:RegisterMsg("ARCHEOLOGY_MISSION_ACCEPT_RESULT", "Archeology_helper_ACCEPT_RESULT")
     local _nexus_addons = ui.GetFrame("_nexus_addons")
     _nexus_addons:RunUpdateScript("Archeology_helper_run_update", 1.0)
     _nexus_addons:RunUpdateScript("Archeology_helper_stamina_update", 2.0)
+    local st = Archeology_helper_state()
+    Archeology_helper_sync(st)
+    if Archeology_helper_in_mission_map(st) then
+        Archeology_helper_log(string.format("enter %s maps=%s used=%d/%d active=%s", session.GetMapName(), st.sig,
+            st.used, st.max, tostring(st.active)))
+    end
     Archeology_helper_frame_init()
 end
 
 function Archeology_helper_stamina_update(_nexus_addons)
     local my_handle = session.GetMyHandle()
     if g.aoh_settings[g.cid].sta_check == 1 then
-        local sta_item = 640009
         local stat = info.GetStat(my_handle)
         local sta_num = math.floor(stat.Stamina / 1000)
         if sta_num <= 1 then
             local now = imcTime.GetAppTime()
             if not g.ah_last_sta_time or (now - g.ah_last_sta_time >= 10.0) then
-                local inv_item = session.GetInvItemByType(sta_item)
+                local inv_item = session.GetInvItemByType(AH.STA_ITEM)
                 if inv_item then
                     INV_ICON_USE(inv_item)
                     g.ah_last_sta_time = now
@@ -8102,15 +8306,82 @@ function Archeology_helper_stamina_update(_nexus_addons)
     return 1
 end
 
+-- 1초 뒤 한 번만 건다(nil 반환 = 한 번 돌고 멈춤, 원본 동작 그대로)
+-- hooks once, a second after start (returning nil stops the update script)
 function Archeology_helper_run_update(_nexus_addons)
     g.setup_hook_and_event(g.addon, "DRAW_CHAT_MSG", "Archeology_helper_DRAW_CHAT_MSG", true)
+end
+
+-- 마크업·공백을 지운 비교용 글자 / text without markup and spaces, for comparison
+function Archeology_helper_norm(s)
+    s = string.gsub(tostring(s or ""), "{[^}]*}", "")
+    s = string.gsub(s, "%s", "")
+    return s
+end
+
+-- ClMsg 의 비교용 글자(언어마다 한 번 만든다) / normalized ClMsg texts, built once
+function Archeology_helper_texts()
+    if g.ah_texts ~= nil and g.ah_texts.lang == g.lang then
+        return g.ah_texts
+    end
+    local t = {lang = g.lang, tiers = {}, exits = {}}
+    for i, tier in ipairs(AH.TIERS) do
+        local ok, m = pcall(ClMsg, tier.key)
+        local n = ok and Archeology_helper_norm(m) or ""
+        -- 키가 없으면 ClMsg 가 키 이름을 돌려준다 → 그건 쓰지 않는다 / an unknown key comes back as itself
+        if n ~= "" and n ~= tier.key then
+            t.tiers[i] = n
+        end
+    end
+    for _, key in ipairs(AH.EXIT_KEYS) do
+        local ok, m = pcall(ClMsg, key)
+        local n = ok and Archeology_helper_norm(m) or ""
+        if n ~= "" and n ~= key then
+            table.insert(t.exits, n)
+        end
+    end
+    g.ah_texts = t
+    return t
+end
+
+-- 거리 단계 번호 / 끝 여부 / returns tier index, is_exit
+-- 🔑 같으면 바로, 아니면 **가장 긴** 포함 일치. "멀리" 와 "아득히 멀리" 처럼 서로 겹치는 문구를 가른다
+function Archeology_helper_match(raw, text)
+    if AH.LEGACY_EXIT[raw] then
+        return nil, true
+    end
+    local t = Archeology_helper_texts()
+    local n = Archeology_helper_norm(text)
+    if n ~= "" then
+        local best, best_len = nil, 0
+        for i, kn in pairs(t.tiers) do
+            if n == kn then
+                return i, false
+            end
+            if string.find(n, kn, 1, true) and #kn > best_len then
+                best, best_len = i, #kn
+            end
+        end
+        if best then
+            return best, false
+        end
+        for _, en in ipairs(t.exits) do
+            if string.find(n, en, 1, true) then
+                return nil, true
+            end
+        end
+    end
+    if AH.LEGACY[raw] then
+        return AH.LEGACY[raw], false
+    end
+    return nil, false
 end
 
 function Archeology_helper_DRAW_CHAT_MSG(my_frame, my_msg)
     if not g.aoh_settings then
         return
     end
-    local groupboxname, startindex = g.get_event_args(my_msg)
+    local groupboxname = g.get_event_args(my_msg)
     if not groupboxname or type(groupboxname) ~= "string" then
         return
     end
@@ -8122,156 +8393,124 @@ function Archeology_helper_DRAW_CHAT_MSG(my_frame, my_msg)
     if not chat then
         return
     end
-    local msg = chat:GetMsg()
-    local config = nil
-    if g.lang == "Japanese" then
-        local jp_configs = {
-            ["@dicID_^*$ETC_20220210_065695$*^"] = {
-                size = 50,
-                color = "FFFF0000"
-            }, -- かなり遠い
-            ["@dicID_^*$ETC_20220210_065696$*^"] = {
-                size = 50,
-                color = "FFFFA500"
-            }, -- 遠い
-            ["@dicID_^*$ETC_20220210_065697$*^"] = {
-                size = 25,
-                color = "FFFFFF00"
-            }, -- 近い
-            ["@dicID_^*$ETC_20220210_065699$*^"] = {
-                size = 25,
-                color = "FFFFFFFF"
-            }, -- かなり近い
-            ["@dicID_^*$ETC_20220210_065693$*^"] = {
-                is_exit = true
-            } -- 終了
-        }
-        config = jp_configs[msg]
-    elseif g.lang == "kr" then
-        if string.find(msg, "유물이") and string.find(msg, "것 같습니다") then -- 考古学メッセージ特有の単語（遺物が/ようです）で絞り込み
-            if string.find(msg, "매우") and string.find(msg, "멀리") then
-                config = {
-                    size = 50,
-                    color = "FFFF0000"
-                } -- かなり遠い
-            elseif string.find(msg, "매우") and string.find(msg, "가까이") then
-                config = {
-                    size = 25,
-                    color = "FFFFFFFF"
-                } -- かなり近い
-            elseif string.find(msg, "멀리") then
-                config = {
-                    size = 50,
-                    color = "FFFFA500"
-                } -- 遠い
-            elseif string.find(msg, "가까이") then
-                config = {
-                    size = 25,
-                    color = "FFFFFF00"
-                } -- 近い
-            end
-        elseif string.find(msg, "발굴 시도") and string.find(msg, "다시 임무") then
-            config = {
-                is_exit = true
-            } -- 終了
-        end
-    else
-        local en_configs = {
-            ["@dicID_^*$ETC_20220204_066856$*^"] = {
-                size = 50,
-                color = "FFFF0000"
-            }, -- かなり遠い
-            ["@dicID_^*$ETC_20220204_066857$*^"] = {
-                size = 50,
-                color = "FFFFA500"
-            }, -- 遠い
-            ["@dicID_^*$ETC_20220204_066858$*^"] = {
-                size = 25,
-                color = "FFFFFF00"
-            }, -- 近い
-            ["@dicID_^*$ETC_20220204_066860$*^"] = {
-                size = 25,
-                color = "FFFFFFFF"
-            }, -- かなり近い
-            ["@dicID_^*$ETC_20220204_066854$*^"] = {
-                is_exit = true
-            } -- 終了
-        }
-        config = en_configs[msg]
-    end
-    if not config then
+    local raw = chat:GetMsg()
+    if type(raw) ~= "string" or raw == "" then
         return
     end
+    -- 🔑 같은 줄이 다시 그려지거나(같은 그룹박스·같은 크기) 여러 탭으로 1초 안에 또 오면 한 번만 본다
+    -- the same line redrawn, or repeated across tabs within a second, is handled once
+    g.ah_seen_box = g.ah_seen_box or {}
+    local seen = g.ah_seen_box[groupboxname]
+    if seen and seen.size == size and seen.raw == raw then
+        return
+    end
+    g.ah_seen_box[groupboxname] = {size = size, raw = raw}
     local now = imcTime.GetAppTime()
-    if g.ah_last_chat_time and (now - g.ah_last_chat_time < 1.0) then
+    if g.ah_last_raw == raw and g.ah_last_chat_time and (now - g.ah_last_chat_time < 1.0) then
         return
     end
+    g.ah_last_raw = raw
     g.ah_last_chat_time = now
+    local text = raw
+    pcall(function()
+        text = dictionary.ReplaceDicIDInCompStr(raw)
+    end)
+    local tier, is_exit = Archeology_helper_match(raw, text)
+    -- 일치한 문구만 남긴다 / log only matched lines
+    if tier then
+        Archeology_helper_log(string.format("detect tier=%d %s", tier, AH.TIERS[tier].key))
+    elseif is_exit then
+        Archeology_helper_log("exit text: " .. Archeology_helper_norm(text))
+    end
+    if is_exit then
+        -- 끝 문구는 신호일 뿐, 상태는 서버 값으로 다시 읽는다(프로퍼티 반영을 조금 기다린다)
+        ReserveScript("Archeology_helper_refresh()", 1.0)
+        return
+    end
+    if not tier then
+        return
+    end
+    local config = AH.TIERS[tier]
     local au_map = ui.GetFrame(addon_name_lower .. "au_map")
     if not au_map then
         return
     end
-    if config.is_exit then
-        g.aoh_display = 1
-        g.aoh_settings.is_archeology = false
-        g.aoh_settings.count = 0
-        g.aoh_settings.map_info = {}
-        Archeology_helper_frame_init()
-    else
-        local cur_map = session.GetMapName()
-        local gbox = GET_CHILD(au_map, "gbox" .. cur_map)
-        local map_pic = GET_CHILD(gbox, "map_pic" .. cur_map)
-        if not map_pic then
-            return
-        end
-        local my_handle = session.GetMyHandle()
-        local pos = info.GetPositionInMap(my_handle, map_pic:GetWidth(), map_pic:GetHeight())
-        Archeology_helper_create_marker(map_pic, pos, config.size, config.color)
-        local count_text = GET_CHILD(au_map, "count_text")
-        if count_text then
-            count_text:SetText("{ol}" .. g.aoh_settings.count .. "/50")
-        end
+    local cur_map = session.GetMapName()
+    local gbox = GET_CHILD(au_map, "gbox" .. cur_map)
+    local map_pic = gbox and GET_CHILD(gbox, "map_pic" .. cur_map)
+    if not map_pic then
+        return
     end
+    local my_handle = session.GetMyHandle()
+    local pos = info.GetPositionInMap(my_handle, map_pic:GetWidth(), map_pic:GetHeight())
+    Archeology_helper_create_marker(map_pic, pos, config.size, config.color)
+end
+
+-- 서버 값으로 다시 맞추고 창을 다시 그린다 / resync with the server and redraw
+function Archeology_helper_refresh()
+    if not g.aoh_settings then
+        return
+    end
+    Archeology_helper_sync(Archeology_helper_state())
     Archeology_helper_save_settings()
+    Archeology_helper_frame_init()
+end
+
+function Archeology_helper_ACCEPT_RESULT(frame, msg, arg_str, arg_num)
+    if arg_str ~= "SUCCESS" then
+        return
+    end
+    Archeology_helper_log("accept SUCCESS lv=" .. tostring(arg_num))
+    -- 🔑 메시지 핸들러 안에서는 창을 부수지 않는다(크래시 위험) → 예약해서 처리
+    -- never rebuild frames inside a message handler; do it from a reserved script
+    ReserveScript("Archeology_helper_new_mission()", 0.5)
+end
+
+function Archeology_helper_new_mission()
+    local st = Archeology_helper_state()
+    Archeology_helper_reset_progress(st, "accept")
+    g.aoh_settings.is_archeology = true
+    g.aoh_display = 0
+    Archeology_helper_save_settings()
+    ui.DestroyFrame(addon_name_lower .. "au_map")
+    Archeology_helper_frame_init()
 end
 
 function Archeology_helper_TARGETSPACE_PRECHECK(my_frame, my_msg)
+    if not g.aoh_settings then
+        return
+    end
     local handle = g.get_event_args(my_msg)
+    if not handle then
+        return
+    end
     local actor = world.GetActor(handle)
     if not actor then
         return
     end
-    if actor:GetType() == 155003 then
-        g.aoh_settings.count = g.aoh_settings.count + 1
-        local map_name = session.GetMapName()
-        if not g.aoh_settings.map_info[map_name] then
-            g.aoh_settings.map_info[map_name] = {}
-        end
-        g.aoh_settings.map_info[map_name].markers = {}
-        g.aoh_settings.map_info[map_name].get_count = (g.aoh_settings.map_info[map_name].get_count or 0) + 1
-        local is_all_complete = true
-        local acc_obj = GetMyAccountObj()
-        for i = 1, (max_archeology_map_count or 3) do
-            local m_name = TryGetProp(acc_obj, "archeology_map_" .. i, "None")
-            if m_name ~= "None" then
-                local info = g.aoh_settings.map_info[m_name]
-                if not info or (info.get_count or 0) < 3 then
-                    is_all_complete = false
-                    break
-                end
-            end
-        end
-        if is_all_complete then
-            g.aoh_settings.is_archeology = false
-            g.aoh_settings.count = 0
-            g.aoh_settings.map_info = {}
-            g.aoh_display = 1
-            ui.SysMsg(g.lang == "Japanese" and "全てのMAPの発掘が完了しました" or
-                          "Archeology completed for all maps")
-        end
-        Archeology_helper_save_settings()
-        Archeology_helper_frame_init()
+    if not AH.MOUND_TYPES[actor:GetType()] then
+        return
     end
+    -- 🔑 대상 지정은 마우스를 올릴 때마다 온다 → 흙더미 하나(핸들)는 한 번만 센다
+    g.ah_dug = g.ah_dug or {}
+    if g.ah_dug[handle] then
+        return
+    end
+    g.ah_dug[handle] = true
+    local st = Archeology_helper_state()
+    local map_name = session.GetMapName()
+    if not g.aoh_settings.map_info[map_name] then
+        g.aoh_settings.map_info[map_name] = {}
+    end
+    local info_t = g.aoh_settings.map_info[map_name]
+    -- 한 지점을 찾으면 탐지기는 다음 지점을 가리킨다 → 그 맵의 마커를 비운다
+    -- once a point is found the detector points at the next one, so the old markers go
+    info_t.markers = {}
+    info_t.get_count = math.min(st.points, (info_t.get_count or 0) + 1)
+    Archeology_helper_log(string.format("mound handle=%s map=%s found=%d/%d", tostring(handle), map_name,
+        info_t.get_count, st.points))
+    Archeology_helper_save_settings()
+    ReserveScript("Archeology_helper_frame_init()", 0.1)
 end
 
 function Archeology_helper_MAP_CHARACTER_UPDATE()
@@ -8282,6 +8521,9 @@ function Archeology_helper_MAP_CHARACTER_UPDATE()
     end
     AUTO_CAST(au_map)
     local map_pic = GET_CHILD_RECURSIVELY(au_map, "map_pic" .. g.map_name)
+    if not map_pic then
+        return
+    end
     AUTO_CAST(map_pic)
     local pos = info.GetPositionInMap(my_handle, map_pic:GetWidth(), map_pic:GetHeight())
     local my = GET_CHILD_RECURSIVELY(au_map, "my")
@@ -8298,19 +8540,16 @@ function Archeology_helper_MAP_CHARACTER_UPDATE()
     map_pic:Invalidate()
 end
 
-function Archeology_helper_ARCHEOLOGY_MISSION_EXECUTE(my_frame, my_msg)
-    g.aoh_settings.count = 0
-    g.aoh_settings.is_archeology = true
-    g.aoh_settings.map_info = {}
-    Archeology_helper_save_settings()
-    g.aoh_display = 0
-    ui.DestroyFrame(addon_name_lower .. "au_map")
-    local _nexus_addons = ui.GetFrame("_nexus_addons")
-    _nexus_addons:RunUpdateScript("Archeology_helper_frame_init", 1.0)
+-- 머리줄의 "탐지 n/70" 글자 / the "tries n/70" header text
+function Archeology_helper_try_text(st)
+    local color = st.used >= st.max and "{#FF6666}" or "{#FFFFFF}"
+    return string.format("{ol}%s%s %d/%d", color, Archeology_helper_t("탐지", "探知", "Tries"), st.used, st.max)
 end
 
 function Archeology_helper_frame_init(_nexus_addons)
     g.map_name = session.GetMapName()
+    local st = Archeology_helper_state()
+    Archeology_helper_sync(st)
     if not g.aoh_settings.is_archeology then
         g.aoh_display = 1
     end
@@ -8324,83 +8563,71 @@ function Archeology_helper_frame_init(_nexus_addons)
     au_map:RemoveAllChild()
     au_map:SetPos(g.aoh_settings.x or 670, g.aoh_settings.y or 70)
     au_map:SetEventScript(ui.LBUTTONUP, "Archeology_helper_frame_save")
-    local acc_obj = GetMyAccountObj()
-    local disp_count = 0 -- ★追加: 表示位置計算用のカウンター
-    for i = 1, (max_archeology_map_count or 3) do
-        local map_name = TryGetProp(acc_obj, "archeology_map_" .. i, "None")
+    local disp_count = 0
+    for i, m in ipairs(st.maps) do
+        local map_name = m.name
         if not g.aoh_settings.map_info[map_name] then
             g.aoh_settings.map_info[map_name] = {
                 get_count = 0
             }
         end
+        local map_info = g.aoh_settings.map_info[map_name]
         local map_cls = GetClass("Map", map_name)
-        local is_complete = TryGetProp(acc_obj, 'archeology_map_' .. i .. '_complete', 0)
-        if map_cls then
-            local gbox = au_map:CreateOrGetControl("picture", "gbox" .. map_name, disp_count * 200, 20, 198, 220)
-            AUTO_CAST(gbox)
-            gbox:SetImage("fullwhite")
-            gbox:SetEnableStretch(1)
-            gbox:SetColorTone("AA696969")
-            gbox:SetAlpha(50)
-            -- gbox:SetSkinName("bg2")
-            local title = gbox:CreateOrGetControl("richtext", "title", 5, 5)
-            AUTO_CAST(title)
-            title:SetText("{ol}{s13}" .. map_cls.Name)
-            for j = 0, 2 do
-                local mark = gbox:CreateOrGetControl("richtext", "mark" .. j, j * 15 + 10, 20)
-                AUTO_CAST(mark)
-                if (g.aoh_settings.map_info[map_name].get_count or 0) > j then
-                    mark:SetText("{#00FF00}●")
-                else
-                    mark:SetText("{#808080}●")
-                end
-            end
-            local map_pic = gbox:CreateOrGetControl("picture", "map_pic" .. map_name, 0, 20, 198, 200)
-            AUTO_CAST(map_pic)
-            map_pic:SetEnableStretch(1)
-            map_pic:EnableHitTest(1)
-            if g.map_name == map_name then
-                local my = map_pic:CreateOrGetControl("picture", "my", 0, 0, 15, 15)
-                AUTO_CAST(my)
-                my:ShowWindow(0)
-                my:SetImage("minimap_leader")
-                my:SetEnableStretch(1)
-                Archeology_helper_char_update(my, map_pic)
-            end
-            Archeology_helper_draw_markers(map_pic, map_name)
-            local is_valid = ui.IsImageExist(map_name .. "_fog")
-            if is_valid == false then
-                world.PreloadMinimap(map_name)
-            end
-            map_pic:SetImage(map_name .. "_fog")
-            local icon_group = map_pic:CreateOrGetControl("picture", "icon_group", ui.CENTER_HORZ, ui.CENTER_VERT,
-                map_pic:GetWidth(), map_pic:GetHeight())
-            AUTO_CAST(icon_group)
-            icon_group:SetSkinName("None")
-            local name_group = map_pic:CreateOrGetControl("picture", "name_group", ui.CENTER_HORZ, ui.CENTER_VERT,
-                map_pic:GetWidth(), map_pic:GetHeight())
-            AUTO_CAST(name_group)
-            name_group:SetSkinName("None")
-            -- UPDATE_MAP_BY_NAME(icon_group, map_name, map_pic, map_pic:GetWidth(), map_pic:GetHeight(), 0, 0)
-            -- MAKE_MAP_AREA_INFO(name_group, map_name, "{s10}", map_pic:GetWidth(), map_pic:GetHeight(), -100, -30)
-            local my_handle = session.GetMyHandle()
-            local buff_info = info.GetBuff(my_handle, 70002)
-            -- local is_token_state = session.loginInfo.IsPremiumState(ITEM_TOKEN)
-            local image_name = ""
-            if buff_info and GET_TOKEN_WARP_COOLDOWN() == 0 then
-                image_name = "{img worldmap2_token_gold 30 30} {@st101lightbrown_16}"
+        local gbox = au_map:CreateOrGetControl("picture", "gbox" .. map_name, disp_count * 200, 20, 198, 220)
+        AUTO_CAST(gbox)
+        gbox:SetImage("fullwhite")
+        gbox:SetEnableStretch(1)
+        gbox:SetColorTone("AA696969")
+        gbox:SetAlpha(50)
+        local title = gbox:CreateOrGetControl("richtext", "title", 5, 5)
+        AUTO_CAST(title)
+        title:SetText("{ol}{s13}" .. map_cls.Name .. (m.done and (" {#7CFC00}" ..
+            Archeology_helper_t("완료", "完了", "Done")) or ""))
+        -- 찾은 지점 ● — 완료면 서버 값으로 전부 채운다 / found points; a completed map fills them all
+        local found = m.done and st.points or (map_info.get_count or 0)
+        for j = 0, st.points - 1 do
+            local mark = gbox:CreateOrGetControl("richtext", "mark" .. j, j * 15 + 10, 20)
+            AUTO_CAST(mark)
+            if found > j then
+                mark:SetText("{#00FF00}●")
             else
-                image_name = "{img worldmap2_token_gray 30 30} {@st101lightbrown_16}"
+                mark:SetText("{#808080}●")
             end
-            local token = gbox:CreateOrGetControl("button", "token" .. i, 0, 0, 30, 30)
-            AUTO_CAST(token)
-            token:SetGravity(ui.RIGHT, ui.TOP)
-            token:SetSkinName("None")
-            token:SetText(image_name)
-            token:SetUserValue("MAP_NAME", map_name)
-            token:SetEventScript(ui.LBUTTONUP, "Archeology_helper_tokenwarp")
-            disp_count = disp_count + 1 -- ★追加: 表示したらカウントアップ
         end
+        local map_pic = gbox:CreateOrGetControl("picture", "map_pic" .. map_name, 0, 20, 198, 200)
+        AUTO_CAST(map_pic)
+        map_pic:SetEnableStretch(1)
+        map_pic:EnableHitTest(1)
+        if g.map_name == map_name then
+            local my = map_pic:CreateOrGetControl("picture", "my", 0, 0, 15, 15)
+            AUTO_CAST(my)
+            my:ShowWindow(0)
+            my:SetImage("minimap_leader")
+            my:SetEnableStretch(1)
+            Archeology_helper_char_update(my, map_pic)
+        end
+        Archeology_helper_draw_markers(map_pic, map_name)
+        local is_valid = ui.IsImageExist(map_name .. "_fog")
+        if is_valid == false then
+            world.PreloadMinimap(map_name)
+        end
+        map_pic:SetImage(map_name .. "_fog")
+        local my_handle = session.GetMyHandle()
+        local buff_info = info.GetBuff(my_handle, 70002)
+        local image_name = ""
+        if buff_info and GET_TOKEN_WARP_COOLDOWN() == 0 then
+            image_name = "{img worldmap2_token_gold 30 30} {@st101lightbrown_16}"
+        else
+            image_name = "{img worldmap2_token_gray 30 30} {@st101lightbrown_16}"
+        end
+        local token = gbox:CreateOrGetControl("button", "token" .. i, 0, 0, 30, 30)
+        AUTO_CAST(token)
+        token:SetGravity(ui.RIGHT, ui.TOP)
+        token:SetSkinName("None")
+        token:SetText(image_name)
+        token:SetUserValue("MAP_NAME", map_name)
+        token:SetEventScript(ui.LBUTTONUP, "Archeology_helper_tokenwarp")
+        disp_count = disp_count + 1
     end
     local display = au_map:CreateOrGetControl("picture", "display", 0, 0, 20, 20)
     AUTO_CAST(display)
@@ -8420,35 +8647,35 @@ function Archeology_helper_frame_init(_nexus_addons)
     display:SetImage(image)
     display:SetEventScript(ui.LBUTTONUP, "Archeology_helper_frame_toggle")
     display:SetEventScript(ui.RBUTTONUP, "Archeology_helper_setting_frame")
-    display:SetTextTooltip("{ol}left-click: Display / hide{nl}right-click: settings")
+    display:SetTextTooltip(Archeology_helper_t("{ol}좌클릭: 표시 / 숨기기{nl}우클릭: 설정",
+        "{ol}左クリック: 表示 / 非表示{nl}右クリック: 設定", "{ol}left-click: Display / hide{nl}right-click: settings"))
     local cool_down = au_map:CreateOrGetControl("richtext", "cool_down", 20, 0)
     AUTO_CAST(cool_down)
     local cd = GET_TOKEN_WARP_COOLDOWN()
-    local minutes = math.floor(cd / 60)
-    local seconds = cd % 60
-    local timer = string.format("%d:%02d", minutes, seconds)
-    cool_down:SetText("{ol}{#FFFFFF}TokenWarp CD: " .. timer)
+    cool_down:SetText(string.format("{ol}{#FFFFFF}TokenWarp CD: %d:%02d", math.floor(cd / 60), cd % 60))
     cool_down:RunUpdateScript("Archeology_helper_tokenwarp_cd", 1.0)
     local count_text = au_map:CreateOrGetControl("richtext", "count_text", cool_down:GetWidth() + 40, 0)
     AUTO_CAST(count_text)
-    count_text:SetText("{ol}" .. g.aoh_settings.count .. "/50")
+    count_text:SetText(Archeology_helper_try_text(st))
+    count_text:SetTextTooltip(Archeology_helper_t("{ol}이번 의뢰에서 쓴 탐지 횟수 / 최대(전시 효과 포함)",
+        "{ol}今回の依頼で使った探知回数 / 最大(展示効果込み)", "{ol}Detector uses this mission / max (incl. exhibition bonus)"))
     local x = cool_down:GetWidth() + 40 + count_text:GetWidth()
+    -- 허가증(의뢰 비용) 보유 수 / permits held (the mission cost)
     local slot = au_map:CreateOrGetControl('slot', 'slot', x + 10, 0, 20, 20)
     AUTO_CAST(slot)
-    local item_cls = GetClassByType('Item', 11030018)
-    SET_SLOT_ITEM_CLS(slot, item_cls)
+    local item_cls = GetClassByType('Item', AH.PERMIT_ID)
+    if item_cls then
+        SET_SLOT_ITEM_CLS(slot, item_cls)
+    end
     local item_count = au_map:CreateOrGetControl("richtext", "item_count", x + 35, 0)
     AUTO_CAST(item_count)
     local arc_text = au_map:CreateOrGetControl("richtext", "arc_text", x + 100, 0)
     AUTO_CAST(arc_text)
-    local msg = ""
     if g.aoh_settings.is_archeology == true then
-        msg = g.lang == "Japanese" and "{ol}{#FF0000}※進行中" or "{ol}{#FF0000}In Progress"
+        arc_text:SetText("{ol}{#FF0000}" .. Archeology_helper_t("진행 중", "※進行中", "In Progress"))
     else
-        msg = g.lang == "Japanese" and "{ol}{#FF0000}※終了" or "{ol}{#FF0000}Ended"
-        count_text:SetText("{ol}50/50")
+        arc_text:SetText("{ol}{#FF0000}" .. Archeology_helper_t("종료", "※終了", "Ended"))
     end
-    arc_text:SetText(msg)
     local base_btn = au_map:CreateOrGetControl("button", "base_btn", 550, 0, 50, 20)
     AUTO_CAST(base_btn)
     base_btn:SetText("{ol}{s12}Base")
@@ -8475,7 +8702,7 @@ function Archeology_helper_setting_frame(au_map, display)
     close:SetGravity(ui.RIGHT, ui.TOP)
     close:SetEventScript(ui.LBUTTONUP, "Archeology_helper_setting_frame_close")
     local gbox = setting:CreateOrGetControl("groupbox", "gbox", 10, 40, setting:GetWidth() - 20,
-        setting:GetHeight() - 50) -- 945
+        setting:GetHeight() - 50)
     AUTO_CAST(gbox)
     gbox:EnableScrollBar(0)
     gbox:SetSkinName("test_frame_midle_light")
@@ -8488,9 +8715,10 @@ function Archeology_helper_setting_frame(au_map, display)
         Archeology_helper_save_settings()
     end
     sta_check:SetCheck(g.aoh_settings[g.cid].sta_check)
-    sta_check:SetText(g.lang == "Japanese" and
-                          "{ol}チェックするとスタミナ錠自動使用{nl}設定はキャラ毎です" or
-                          "{ol}If checked, it will automatically use stamina pills{nl}Settings are per character")
+    sta_check:SetText(Archeology_helper_t(
+        "{ol}체크하면 스태미나 알약을 자동으로 씁니다{nl}캐릭터마다 따로 저장됩니다",
+        "{ol}チェックするとスタミナ錠自動使用{nl}設定はキャラ毎です",
+        "{ol}If checked, it will automatically use stamina pills{nl}Settings are per character"))
     sta_check:SetEventScript(ui.LBUTTONUP, "Archeology_helper_setting_change")
     setting:Resize(sta_check:GetWidth() + 40, 120)
     gbox:Resize(setting:GetWidth() - 20, 70)
@@ -8550,22 +8778,21 @@ function Archeology_helper_draw_markers(map_pic, map_name)
     end
 end
 
+-- 1초 틱: 토큰 쿨 · 허가증 수 · 탐지 횟수. 서버 값이 바뀌어 새 의뢰·종료가 되면 창을 다시 그린다
+-- one-second tick; a new mission or an ended one redraws the window (reserved, not from inside the tick)
 function Archeology_helper_tokenwarp_cd(cool_down)
     local cd = GET_TOKEN_WARP_COOLDOWN()
-    local minutes = math.floor(cd / 60)
-    local seconds = cd % 60
-    local timer = string.format("%d:%02d", minutes, seconds)
-    cool_down:SetText("{ol}{#FFFFFF}TokenWarp CD: " .. timer)
+    cool_down:SetText(string.format("{ol}{#FFFFFF}TokenWarp CD: %d:%02d", math.floor(cd / 60), cd % 60))
     local my_handle = session.GetMyHandle()
     local au_map = cool_down:GetTopParentFrame()
+    local buff_info = info.GetBuff(my_handle, 70002)
+    local image_name = ""
+    if buff_info and cd == 0 then
+        image_name = "{img worldmap2_token_gold 30 30} {@st101lightbrown_16}"
+    else
+        image_name = "{img worldmap2_token_gray 30 30} {@st101lightbrown_16}"
+    end
     for i = 1, (max_archeology_map_count or 3) do
-        local buff_info = info.GetBuff(my_handle, 70002)
-        local image_name = ""
-        if buff_info and GET_TOKEN_WARP_COOLDOWN() == 0 then
-            image_name = "{img worldmap2_token_gold 30 30} {@st101lightbrown_16}"
-        else
-            image_name = "{img worldmap2_token_gray 30 30} {@st101lightbrown_16}"
-        end
         local token = GET_CHILD_RECURSIVELY(au_map, "token" .. i)
         if token then
             AUTO_CAST(token)
@@ -8573,18 +8800,32 @@ function Archeology_helper_tokenwarp_cd(cool_down)
         end
     end
     local slot = GET_CHILD(au_map, "slot")
-    local icon = slot:GetIcon()
-    if not icon then
-        icon = CreateIcon(slot)
-    end
     local item_count = GET_CHILD(au_map, "item_count")
-    local inv_item = session.GetInvItemByType(11030018)
-    if inv_item then
-        icon:SetColorTone('FFFFFFFF')
-        item_count:SetText("{ol}(" .. inv_item.count .. ")")
-    else
-        icon:SetColorTone('FFFF0000')
-        item_count:SetText("{ol}(0)")
+    if slot and item_count then
+        AUTO_CAST(slot)
+        local icon = slot:GetIcon()
+        if not icon then
+            icon = CreateIcon(slot)
+        end
+        local inv_item = session.GetInvItemByType(AH.PERMIT_ID)
+        if inv_item then
+            icon:SetColorTone('FFFFFFFF')
+            item_count:SetText("{ol}(" .. inv_item.count .. ")")
+        else
+            icon:SetColorTone('FFFF0000')
+            item_count:SetText("{ol}(0)")
+        end
+    end
+    local st = Archeology_helper_state()
+    local was_active = g.aoh_settings.is_archeology
+    local is_new = Archeology_helper_sync(st)
+    local count_text = GET_CHILD(au_map, "count_text")
+    if count_text then
+        count_text:SetText(Archeology_helper_try_text(st))
+    end
+    if is_new or was_active ~= g.aoh_settings.is_archeology then
+        Archeology_helper_save_settings()
+        ReserveScript("Archeology_helper_frame_init()", 0.1)
     end
     return 1
 end
@@ -8592,6 +8833,9 @@ end
 function Archeology_helper_create_marker(map_pic, pos, size, color)
     g.aoh_settings.count = (g.aoh_settings.count or 0) + 1
     local map_name = session.GetMapName()
+    if not g.aoh_settings.map_info[map_name] then
+        g.aoh_settings.map_info[map_name] = {}
+    end
     if not g.aoh_settings.map_info[map_name].markers then
         g.aoh_settings.map_info[map_name].markers = {}
     end

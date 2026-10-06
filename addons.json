@@ -22,14 +22,14 @@
     "tags": ["yomae", "cupole", "addons", "toggle cupole potion", "toggle", "potion", "요매", "yoma16", "큐폴"]
   },
   {
-    "tosversion" : "20260924",
+    "tosversion" : "20261007",
     "name": "New Nexus Addons",
     "file": "new_nexus_addons",
     "extension": "ipf",
-    "fileVersion": "v1.2.3",
-    "releaseTag": "new_nexus_addons_v-1.2.3",
+    "fileVersion": "v1.2.4",
+    "releaseTag": "new_nexus_addons_v-1.2.4",
     "unicode": "⛄",
-    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.2.3: 인던 패널에서 공명의 성소 입장이 안 되던 문제, 배럭 아이템 검색에서 개인창고 아이템이 안 나오던 문제를 고쳤습니다. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.2.3: Fixed entering the Sanctuary of Resonance from the dungeon panel, and personal warehouse items missing from the character item search. <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.2.3: インダンパネルから共鳴の聖所に入場できなかった問題と、キャラクターアイテム検索で個人倉庫のアイテムが出なかった問題を修正しました。",
+    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.2.4: 인던 패널에 고고학 아이콘 추가(유물 상점 / 아이리네 이동), Archeology Helper 를 개편된 고고학에 맞춰 수정했습니다. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.2.4: Added an archaeology icon to the dungeon panel (relic shop / move to Airine) and updated Archeology Helper for the reworked archaeology. <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.2.4: インダンパネルに考古学アイコンを追加(遺物ショップ / アイリーネへ移動)、Archeology Helper をリニューアルされた考古学に対応させました。",
     "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
   },
   {
