@@ -60,12 +60,13 @@
 -- 1.2.2 "IP: the Lv.560 challenge ticket buttons spend what you already hold before buying. 1.1.9 made the mercenary-badge button buy first, reasoning that the badge allowance resets each period - but an expiring ticket is lost if it is not used, so a timed ticket sat in the bag expiring while a new one was bought. Both Lv.560 buttons now follow the same order: expiring, then untradeable, then buy, then tradable permanent. The Lv.540 row is unchanged. Both tooltips were rewritten to match - the TOS-coin one had been missing the untradeable step, and its English text showed the mercenary-badge icon in place of the coin"
 -- 1.2.3 "IP: the Sanctuary of Resonance entry button now actually lets you in. Since 1.1.7 the step-selection window opened but pressing enter in it did nothing, because the panel drew the window itself without first telling the server which dungeon you were entering. The button now makes the same registration request the game uses, and the server opens the step window, so choosing a step and entering works. CIS: items in the personal warehouse are now saved for the character item search. The save hook was registered under a misspelled name (a stray quote before WAREHOUSE_CLOSE), so closing the warehouse never saved anything and warehouse items could not be found"
 -- 1.2.4 "IP: new archaeology icon - left-click opens the relic shop from anywhere, right-click walks you to Archaeologist Airine (Klaipeda). Archeology Helper updated for the reworked archaeology (one region, four dig points, 70 detector uses): all seven distance messages now draw a coloured circle (the closest ones were ignored before), and the header shows tries used / max, points found and dig permits held"
+-- 1.2.5 "SQ: abandoning a quest now clears its shortcut. The release call passed the quest id as the third argument to a function that takes one, so it removed a key named 'nil' and the shortcut stayed on screen - this dates back to the original. Since the KR client update of 2026-11-03 (rev 409316) abandoning only sends a request and the server confirms it with QUEST_ABANDON_CONFIRM; on such clients the saved NPC is now released on that confirmation (keyed by the quest state before the abandon), so a refused abandon no longer drops the save. Older clients keep releasing at request time"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.2.4"
+local ver = "1.2.5"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -24987,7 +24988,13 @@ function save_quest_on_init()
     end
     g.setup_hook_and_event(g.addon, "SET_QUEST_CTRL_MARK", "Save_quest_SET_QUEST_CTRL_MARK", true)
     g.setup_hook_and_event(g.addon, "SCR_QUEST_SHARE_PARTY_MEMBER", "Save_quest_SCR_QUEST_SHARE_PARTY_MEMBER", true)
+    -- 🔑 11/3 클라 패치(rev 409316)부터 EXEC_ABANDON_QUEST 는 요청만 보내고, 실제 포기는 서버 확인 메시지
+    --    QUEST_ABANDON_CONFIRM(argNum = questID) 로 온다(서버가 거부하면 퀘스트는 그대로). 새 클라는 확인에 붙는다
+    -- since KR rev 409316 the abandon is confirmed by QUEST_ABANDON_CONFIRM; old clients keep the hook
     g.setup_hook_and_event(g.addon, "EXEC_ABANDON_QUEST", "Save_quest_EXEC_ABANDON_QUEST", true)
+    if QUEST_ON_ABANDON_CONFIRM ~= nil then
+        g.addon:RegisterMsg("QUEST_ABANDON_CONFIRM", "Save_quest_ON_ABANDON_CONFIRM")
+    end
     g.addon:RegisterMsg("TARGET_SET", "Save_quest_ON_TARGET_SET")
     Save_quest_npc_hide()
     Save_quest_short_cut()
@@ -25095,8 +25102,43 @@ function Save_quest_EXEC_ABANDON_QUEST(my_frame, my_msg)
         return
     end
     local quest_id = g.get_event_args(my_msg)
-    Save_quest_save(quest_id, "release")
-    Save_quest_short_cut_release(nil, nil, tostring(quest_id), nil)
+    if QUEST_ON_ABANDON_CONFIRM ~= nil then
+        -- 새 클라: 저장 키(NPC)는 퀘스트 상태로 정해진다 → 포기 **전** 상태로 지금 계산해 두고, 확인 때 푼다
+        -- new client: compute the NPC key from the pre-abandon state now, release it on confirmation
+        local quest_cls = GetClassByType("QuestProgressCheck", quest_id)
+        if quest_cls == nil then
+            return
+        end
+        local result = SCR_QUEST_CHECK_C(GetMyPCObject(), quest_cls.ClassName)
+        g.save_quest_pending = g.save_quest_pending or {}
+        g.save_quest_pending[tostring(quest_id)] = quest_cls[CONVERT_STATE(result) .. 'NPC']
+        return
+    end
+    Save_quest_release(quest_id)
+end
+
+function Save_quest_ON_ABANDON_CONFIRM(frame, msg, arg_str, quest_id)
+    local key = tostring(quest_id)
+    local npc_state = g.save_quest_pending and g.save_quest_pending[key]
+    if npc_state == nil then
+        return
+    end
+    g.save_quest_pending[key] = nil
+    if g.settings.save_quest.use == 0 then
+        return
+    end
+    Save_quest_release(quest_id, npc_state)
+end
+
+-- 포기한 퀘스트의 저장과 바로가기를 푼다(npc_state 를 주면 그 키를 푼다)
+-- 🔴 바로가기 해제는 인자 하나(quest_id)를 받는다. 예전 호출은 (nil, nil, id, nil) 이라 "nil" 키를 지워
+--    바로가기가 남았다(norisan 원작부터)
+-- release the abandoned quest's save and shortcut (the old call passed the id as the 3rd arg)
+function Save_quest_release(quest_id, npc_state)
+    Save_quest_save(quest_id, "release", npc_state)
+    if g.save_quest_settings.short_cuts[tostring(quest_id)] ~= nil then
+        Save_quest_short_cut_release(quest_id)
+    end
 end
 
 function Save_quest_SET_QUEST_CTRL_MARK(my_frame, my_msg)
@@ -25174,10 +25216,14 @@ function Save_quest_menu(frame, ctrl, quest_name, quest_id)
     ui.OpenContextMenu(context)
 end
 
-function Save_quest_save(quest_id, stat)
-    local quest_cls = GetClassByType("QuestProgressCheck", quest_id)
-    local result = SCR_QUEST_CHECK_C(GetMyPCObject(), quest_cls.ClassName)
-    local npc_state = quest_cls[CONVERT_STATE(result) .. 'NPC']
+function Save_quest_save(quest_id, stat, npc_state)
+    -- npc_state 를 주면 그 키를 쓴다(포기 확인 때는 상태가 이미 바뀌어 다시 계산하면 다른 키가 된다)
+    -- an explicit npc_state wins: after an abandon the recomputed key would differ
+    if npc_state == nil then
+        local quest_cls = GetClassByType("QuestProgressCheck", quest_id)
+        local result = SCR_QUEST_CHECK_C(GetMyPCObject(), quest_cls.ClassName)
+        npc_state = quest_cls[CONVERT_STATE(result) .. 'NPC']
+    end
     if stat == "save" then
         g.save_quest_settings.save_quests[npc_state] = 1
     else
@@ -25187,9 +25233,13 @@ function Save_quest_save(quest_id, stat)
     local quest = ui.GetFrame("quest")
     if quest:IsVisible() == 1 then
         local quest_ctrl_set = GET_CHILD_RECURSIVELY(quest, "_Q_" .. quest_id)
-        AUTO_CAST(quest_ctrl_set)
-        local quest_cls = GetClassByType("QuestProgressCheck", quest_id)
-        SET_QUEST_CTRL_MARK(quest_ctrl_set, quest_cls)
+        -- 포기 확인 때는 클라가 목록을 이미 다시 그려 컨트롤이 없을 수 있다
+        -- on an abandon confirmation the client may already have removed the row
+        if quest_ctrl_set ~= nil then
+            AUTO_CAST(quest_ctrl_set)
+            local quest_cls = GetClassByType("QuestProgressCheck", quest_id)
+            SET_QUEST_CTRL_MARK(quest_ctrl_set, quest_cls)
+        end
     end
 end
 
