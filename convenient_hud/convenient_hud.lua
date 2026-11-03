@@ -1,4 +1,5 @@
 -- v1.0.0 first release
+-- v1.0.1 KR rev 409316 (2026-11-03): clarity is also saved to the client per-character store (it reverted on every map change), cupole potion toggle sends the wanted value
 -- 편의 설정 HUD: 자주 바꾸는 그래픽/전투 옵션 5가지를 화면에서 바로 전환한다
 -- 값은 저장하지 않는다: mini_addons 같은 다른 애드온도 같은 옵션을 로그인에 밀어넣으므로,
 -- 사본을 들고 있다가 다시 적용하면 서로 덮어쓰는 싸움이 된다. 언제나 현재 값을 읽어 보여준다
@@ -6,7 +7,7 @@
 -- nothing is cached - other addons (mini_addons) push the same options at login, so keeping a
 -- private copy and re-applying it would just be a fight over who writes last
 local addonName = "convenient_hud"
-local version = "1.0.0"
+local version = "1.0.1"
 local author = "Yomae"
 
 local addonNameLower = string.lower(addonName)
@@ -214,7 +215,14 @@ local function CH_toggle_cupole_potion()
     end
     pcall(CH_set_potion_icon, ui.GetFrame("cupole_external_addon"), cur)
     pcall(CH_set_potion_icon, ui.GetFrame("cupole_item"), cur)
-    pc.ReqExecuteTx_Item("CUPOLE_PORITON_AUTO_USE_TOGGLE", 0, 0)
+    -- 🔑 11/3 클라 패치(rev 409316)부터 tx 3번째 인자 = 원하는 값(1 = 켜짐). 옛 클라는 0 을 보냈다.
+    --    새 클라는 서버 확인(CUPOLE_AUTO_POTION_STATE)으로 쿠폴 창 아이콘을 다시 그린다
+    -- since KR rev 409316 the 3rd tx argument is the wanted value; old clients sent 0
+    local want = 0
+    if ON_CUPOLE_AUTO_POTION_STATE ~= nil then
+        want = (cur == 1) and 0 or 1
+    end
+    pc.ReqExecuteTx_Item("CUPOLE_PORITON_AUTO_USE_TOGGLE", 0, want)
     CHAT_SYSTEM("[Cupole Potion] Auto-use → " .. ((cur == 0) and "ON" or "OFF"))
     return true
 end
@@ -270,6 +278,14 @@ local function CH_apply_clarity(kind_index, raw)
     end
     config.ChangeXMLConfig("EnableEffectTransparency", "1")
     pcall(config[kind.setter], raw)
+    -- 🔑 11/3 클라 패치(rev 409316)부터 선명도는 캐릭터별로 클라 설정 파일에 저장되고 맵 입장마다 그 값이
+    --    다시 입혀진다 → config 만 바꾸면 다음 맵에서 되돌아간다. 설정창 슬라이더처럼 그 저장소에도 넣는다
+    --    (새 클라에만 있는 함수라 있을 때만)
+    -- since KR rev 409316 the client re-applies a per-character store on map load: save into it too
+    if save_effect_transparency_value ~= nil then
+        local names = {"my", "other", "boss"}
+        pcall(save_effect_transparency_value, names[kind_index], raw)
+    end
 end
 
 -- ============================================================

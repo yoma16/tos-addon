@@ -11,25 +11,25 @@
     "tags": ["yomae", "cupole", "addons", "cupole manager", "cupole preset", "preset", "요매", "yoma16", "큐폴"]
   },
   {
-    "tosversion" : "20260221",
+    "tosversion" : "20261103",
     "name": "Toggle Cupole Potion",
     "file": "toggle_cupole_potion",
     "extension": "ipf",
-    "fileVersion": "v1.0.0",
-    "releaseTag": "toggle_cupole_potion",
+    "fileVersion": "v1.0.1",
+    "releaseTag": "toggle_cupole_potion_v1.0.1",
     "unicode": "⛄",
-    "description": "큐폴 물약 사용 토글을 키보드의 '\\(BackSlash)' 버튼으로 할 수 있습니다. <br> 단, 도시에서는 사용할 수 없습니다. <br> You can toggle cupole potion with '\\' key. <br> However, you cannot toggle in city.",
+    "description": "큐폴 물약 사용 토글을 키보드의 '\\(BackSlash)' 버튼으로 할 수 있습니다. 단, 도시에서는 사용할 수 없습니다. <br>v1.0.1: 2026-11-03 KR 클라이언트 업데이트에 맞춰 토글 방식을 고치고, 쿠폴 창의 물약 아이콘이 반대로 표시되던 문제를 수정했습니다. <br>You can toggle cupole potion with the '\\' key. However, you cannot toggle in a city. <br>v1.0.1: updated the toggle for the 2026-11-03 KR client and fixed the cupole window potion icon showing the opposite state. <br>キーボードの '\\' キーでクポル自動ポーションを切り替えます。ただし都市では使えません。 <br>v1.0.1: 2026-11-03 KRクライアント更新に合わせて切り替え方式を修正し、クポルウィンドウのポーションアイコンが逆に表示される問題を修正しました。",
     "tags": ["yomae", "cupole", "addons", "toggle cupole potion", "toggle", "potion", "요매", "yoma16", "큐폴"]
   },
   {
-    "tosversion" : "20261007",
+    "tosversion" : "20261103",
     "name": "New Nexus Addons",
     "file": "new_nexus_addons",
     "extension": "ipf",
-    "fileVersion": "v1.2.4",
-    "releaseTag": "new_nexus_addons_v-1.2.4",
+    "fileVersion": "v1.2.5",
+    "releaseTag": "new_nexus_addons_v-1.2.5",
     "unicode": "⛄",
-    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.2.4: 인던 패널에 고고학 아이콘 추가(유물 상점 / 아이리네 이동), Archeology Helper 를 개편된 고고학에 맞춰 수정했습니다. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.2.4: Added an archaeology icon to the dungeon panel (relic shop / move to Airine) and updated Archeology Helper for the reworked archaeology. <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.2.4: インダンパネルに考古学アイコンを追加(遺物ショップ / アイリーネへ移動)、Archeology Helper をリニューアルされた考古学に対応させました。",
+    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.2.5: 세이브 퀘스트 - 퀘스트를 포기하면 바로가기도 해제됩니다. 최신 KR 클라이언트에서는 서버가 포기를 확정했을 때만 저장을 해제합니다. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.2.5: Save Quest - abandoning a quest now also clears its shortcut. On the latest KR client the save is cleared only after the server confirms the abandon. <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.2.5: セーブクエスト - クエストを放棄するとショートカットも解除されます。最新のKRクライアントではサーバーが放棄を確定した時だけ保存を解除します。",
     "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
   },
   {
@@ -55,14 +55,14 @@
     "tags": ["yomae", "auto_keeper", "stamina", "repair", "relic", "yoma16", "요매", "자동"]
   },
   {
-    "tosversion" : "20260817",
+    "tosversion" : "20261103",
     "name": "Convenient HUD",
     "file": "convenient_hud",
     "extension": "ipf",
-    "fileVersion": "v1.0.0",
-    "releaseTag": "convenient_hud_v1.0.0",
+    "fileVersion": "v1.0.1",
+    "releaseTag": "convenient_hud_v1.0.1",
     "unicode": "⛄",
-    "description": "편의 설정 HUD. 자주 바꾸는 설정 5가지(다른 캐릭터 이펙트 보기, 큐폴 자동 물약, 내 이펙트·다른 캐릭터·보스 몬스터 선명도)를 설정창을 열지 않고 화면에서 바로 전환합니다. HUD는 드래그로 옮기면 위치가 저장됩니다.<br> v1.0.0: 값을 저장하지 않고 패널을 열 때마다 클라이언트의 현재 값을 읽어 보여줍니다. 다른 애드온도 같은 설정을 건드리기 때문에, 사본을 들고 있다가 다시 적용하면 서로 덮어쓰게 되기 때문입니다. 선명도는 10/25/50/75/100% 다섯 단계이고 지금 값과 정확히 같을 때만 강조 표시합니다.<br> Convenient HUD. Flip five frequently-changed settings in place — other players' effects, cupole auto potion, and the clarity of your own, other players' and boss effects — without opening the option window. Drag the bar to move it and the position is saved.<br> v1.0.0: nothing is stored. The panel reads the client's live values every time it opens, because other addons write the same settings and a private copy would just fight over who writes last. Clarity has five steps (10/25/50/75/100%) and a step is highlighted only when it matches the current value exactly.<br> 便利設定HUD。よく変える設定5つ(他キャラのエフェクト表示、クポル自動ポーション、自分・他キャラ・ボスモンスターのエフェクト鮮明度)を設定ウィンドウを開かずにその場で切り替えます。HUDはドラッグで移動でき位置が保存されます。<br> v1.0.0: 値は保存せず、パネルを開くたびにクライアントの現在値を読んで表示します。他のアドオンも同じ設定を書き換えるため、コピーを持って再適用すると上書き合戦になるからです。鮮明度は10/25/50/75/100%の5段階で、現在値と完全に一致する時だけ強調表示します。",
+    "description": "편의 설정 HUD. 자주 바꾸는 설정 5가지(다른 캐릭터 이펙트 보기, 큐폴 자동 물약, 내 이펙트·다른 캐릭터·보스 몬스터 선명도)를 설정창을 열지 않고 화면에서 바로 전환합니다. <br>v1.0.1: HUD로 바꾼 이펙트 선명도가 맵 이동마다 원래대로 돌아가던 문제를 고쳤습니다. 큐폴 자동 물약 전환을 2026-11-03 KR 클라이언트에 맞췄습니다. <br>Convenient HUD. Flip five frequently-changed settings in place - other players' effects, cupole auto potion, and the clarity of your own, other players' and boss effects - without opening the option window. <br>v1.0.1: effect clarity set from the HUD no longer resets on every map change. The cupole auto potion toggle is updated for the 2026-11-03 KR client. <br>便利設定HUD。よく変える設定5つ(他キャラのエフェクト表示、クポル自動ポーション、自分・他キャラ・ボスモンスターのエフェクト鮮明度)を設定ウィンドウを開かずにその場で切り替えます。 <br>v1.0.1: HUDで変更したエフェクト鮮明度がマップ移動のたびに元に戻る問題を修正しました。クポル自動ポーションの切り替えを2026-11-03 KRクライアントに対応させました。",
     "tags": ["yomae", "convenient_hud", "option", "effect", "yoma16", "요매", "편의"]
   },
   {
