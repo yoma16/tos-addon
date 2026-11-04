@@ -61,12 +61,13 @@
 -- 1.2.3 "IP: the Sanctuary of Resonance entry button now actually lets you in. Since 1.1.7 the step-selection window opened but pressing enter in it did nothing, because the panel drew the window itself without first telling the server which dungeon you were entering. The button now makes the same registration request the game uses, and the server opens the step window, so choosing a step and entering works. CIS: items in the personal warehouse are now saved for the character item search. The save hook was registered under a misspelled name (a stray quote before WAREHOUSE_CLOSE), so closing the warehouse never saved anything and warehouse items could not be found"
 -- 1.2.4 "IP: new archaeology icon - left-click opens the relic shop from anywhere, right-click walks you to Archaeologist Airine (Klaipeda). Archeology Helper updated for the reworked archaeology (one region, four dig points, 70 detector uses): all seven distance messages now draw a coloured circle (the closest ones were ignored before), and the header shows tries used / max, points found and dig permits held"
 -- 1.2.5 "SQ: abandoning a quest now clears its shortcut. The release call passed the quest id as the third argument to a function that takes one, so it removed a key named 'nil' and the shortcut stayed on screen - this dates back to the original. Since the KR client update of 2026-11-03 (rev 409316) abandoning only sends a request and the server confirms it with QUEST_ABANDON_CONFIRM; on such clients the saved NPC is now released on that confirmation (keyed by the quest state before the abandon), so a refused abandon no longer drops the save. Older clients keep releasing at request time"
+-- 1.2.6 "IP: challenge and singularity entry no longer miss the auto-match click after buying a ticket. Each step used to run after a fixed delay (use the ticket 1.0s after buying, open the window at 1.5s, request 0.3s later) with no retry, so a slow server reply skipped a step. Entry now waits for each state instead - the bought ticket arriving, the entry count rising, the entry window opening, and matching actually starting (solo: the window closing) - and re-sends the request when it does not take. A step that does not finish within 10 seconds shows a message and writes the trace to debug_log.txt"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.2.5"
+local ver = "1.2.6"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -3059,7 +3060,13 @@ function Indun_panel_INDUN_ALREADY_PLAYING_dilay()
     if indun_type == 1007 or indun_type == 2001 or indun_type == 2003 then
         AnsGiveUpPrevPlayingIndun(1)
         ui.CloseFrame("indunenter")
-        ReserveScript(string.format("Indun_panel_enter_singularity(nil,nil,'', %d)", indun_type), 0.5)
+        -- 1007 은 챌린지(파티 자동매칭)다. 예전엔 분열 함수로 보내 분열 체크박스를 따랐다
+        -- 1007 is the challenge party queue; it used to go through the singularity path
+        if indun_type == 1007 then
+            ReserveScript(string.format("Indun_panel_enter_challenge(nil,nil,'2', %d)", indun_type), 0.5)
+        else
+            ReserveScript(string.format("Indun_panel_enter_singularity(nil,nil,'', %d)", indun_type), 0.5)
+        end
         return
     else
         local yes_scp = string.format("AnsGiveUpPrevPlayingIndun(%d)", 1)
@@ -4225,10 +4232,12 @@ function Indun_panel_get_my_housing_point_callback(code, ret_json)
     end
 end
 
-function Indun_panel_item_buy_use(recipe_name)
+-- 구매 tx 만 보낸다. 받을 아이템 이름을 돌려준다(못 보냈으면 nil)
+-- sends the purchase only; returns the item name it will deliver
+function Indun_panel_item_buy(recipe_name)
     local recipe_cls = GetClass("ItemTradeShop", recipe_name)
     if not recipe_cls then
-        return
+        return nil
     end
     session.ResetItemList()
     session.AddItemID(tostring(0), 1)
@@ -4239,7 +4248,14 @@ function Indun_panel_item_buy_use(recipe_name)
     else
         item.DialogTransaction("PVP_MINE_SHOP", itemlist, cnt_text)
     end
-    local item_name = recipe_cls.TargetItem
+    return recipe_cls.TargetItem
+end
+
+function Indun_panel_item_buy_use(recipe_name)
+    local item_name = Indun_panel_item_buy(recipe_name)
+    if not item_name then
+        return
+    end
     ReserveScript(string.format("Indun_panel_inv_item_use('%s')", item_name), 1.0)
 end
 
@@ -4530,8 +4546,7 @@ function Indun_panel_process_ticket(indun_type, mode, config)
     end
     local function try_buy()
         if Indun_panel_get_recipe_trade_count(recipe_name) >= 1 then
-            Indun_panel_item_buy_use(recipe_name)
-            Indun_panel_enter_reserve(enter_mode, indun_type)
+            Indun_panel_enter_reserve(enter_mode, indun_type, recipe_name)
             return true
         end
         return false
@@ -4569,8 +4584,7 @@ function Indun_panel_process_ticket(indun_type, mode, config)
             local over_prop = TryGetProp(recipe_cls, 'OverBuyProperty', 'None')
             local over_count = TryGetProp(account_obj, over_prop, 0)
             if (tonumber(over_max) - tonumber(over_count)) > 0 then
-                Indun_panel_item_buy_use(recipe_name)
-                Indun_panel_enter_reserve(enter_mode, indun_type)
+                Indun_panel_enter_reserve(enter_mode, indun_type, recipe_name)
                 return
             end
         end
@@ -4610,14 +4624,17 @@ function Indun_panel_use_prioritized_ticket(ticket_ids, enter_mode, indun_type)
         end
         return a.order < b.order
     end)
+    AnsGiveUpPrevPlayingIndun(1)
     INV_ICON_USE(candidate_tickets[1].use_item)
-    Indun_panel_enter_reserve(enter_mode, indun_type)
+    Indun_panel_entry_start("ch", indun_type, enter_mode, "count")
     return true
 end
 
-function Indun_panel_enter_reserve(index, indun_type)
+-- 구매 후 입장. 시간이 아니라 상태를 보고 진행한다(Indun_panel_entry_tick)
+-- buy, then let the stepper wait on state
+function Indun_panel_enter_reserve(index, indun_type, recipe_name)
     AnsGiveUpPrevPlayingIndun(1)
-    ReserveScript(string.format("Indun_panel_enter_challenge(nil,nil,'%d', %d)", index, indun_type), 1.5)
+    Indun_panel_entry_start("ch", indun_type, index, "item", Indun_panel_item_buy(recipe_name))
 end
 
 function Indun_panel_enter_challenge(indun_panel, ctrl, index, indun_type)
@@ -4625,12 +4642,7 @@ function Indun_panel_enter_challenge(indun_panel, ctrl, index, indun_type)
     if not indun_type then
         return
     end
-    local pcparty = session.party.GetPartyInfo()
-    if not pcparty then
-        CREATE_PARTY_BTN()
-    end
-    ReqChallengeAutoUIOpen(indun_type)
-    ReserveScript(string.format("ReqMoveToIndun(%d,%d)", index, 0), 0.3)
+    Indun_panel_entry_start("ch", indun_type, index, "ui")
 end
 
 -- 챌린지와 같이 한 단계씩 올렸다: 520 제거, 540 / 560 두 칸.
@@ -4762,21 +4774,18 @@ function Indun_panel_item_use_sin(frame, ctrl, mode, indun_type)
     -- 540(낮은 칸) 버튼은 mode 문자열을 넘기지 않는다(원본 그대로) -> 그 경우도 TOS 로 본다
     if mode == "tos" or indun_type == 2001 then
         local recipe = (indun_type == 2001) and "EVENT_TOS_WHOLE_SHOP_319" or "EVENT_TOS_WHOLE_SHOP_321"
+        -- 산 뒤는 시간이 아니라 상태를 보고 진행한다(Indun_panel_entry_tick)
+        -- after buying, the stepper waits on state instead of fixed delays
         if Indun_panel_get_recipe_trade_count(recipe) >= 1 then
-            Indun_panel_item_buy_use(recipe)
-            ReserveScript(string.format("Indun_panel_enter_singularity(nil,nil,'', %d)", indun_type), 1.5)
+            Indun_panel_entry_start("sin", indun_type, 2, "item", Indun_panel_item_buy(recipe))
             return
         end
     elseif mode == "pvp" then
-        if Indun_panel_get_recipe_trade_count("PVP_MINE_41") >= 1 then
-            Indun_panel_item_buy_use("PVP_MINE_41")
-            ReserveScript(string.format("Indun_panel_enter_singularity(nil,nil,'', %d)", indun_type), 1.5)
-            return
-        end
-        if Indun_panel_get_recipe_trade_count("PVP_MINE_42") >= 1 then
-            Indun_panel_item_buy_use("PVP_MINE_42")
-            ReserveScript(string.format("Indun_panel_enter_singularity(nil,nil,'', %d)", indun_type), 1.5)
-            return
+        for _, recipe in ipairs({"PVP_MINE_41", "PVP_MINE_42"}) do
+            if Indun_panel_get_recipe_trade_count(recipe) >= 1 then
+                Indun_panel_entry_start("sin", indun_type, 2, "item", Indun_panel_item_buy(recipe))
+                return
+            end
         end
     end
     -- Lv.560 은 못 샀을 때만 거래 가능한 무기한을 꺼낸다(값이 나가는 물건이라 아낀다)
@@ -4821,13 +4830,12 @@ function Indun_panel_item_use_and_run(use_item, indun_type)
     AnsGiveUpPrevPlayingIndun(1)
     if use_item and indun_type then
         INV_ICON_USE(use_item)
-        ReserveScript(string.format("Indun_panel_enter_singularity(nil,nil,'', %d)", indun_type), 0.5)
+        Indun_panel_entry_start("sin", indun_type, 2, "count")
         return
     end
 end
 
 function Indun_panel_enter_singularity(frame, ctrl, str, indun_type)
-    ReqChallengeAutoUIOpen(indun_type)
     local indun_cls = GetClassByType('Indun', indun_type)
     if indun_cls then
         local indun_min_rank = TryGetProp(indun_cls, 'PCRank')
@@ -4838,21 +4846,245 @@ function Indun_panel_enter_singularity(frame, ctrl, str, indun_type)
                 return
             end
         end
-        if g.indun_panel_settings.etc.singularity_check == 0 then
-            -- 4인 이하 자동 동의는 **540 분열(2001)만** 건다.
-            -- 자동매칭은 서버가 걸어 주므로 여기서 바로 요청하면 이르다 → 표식만 남기고
-            -- INDUNENTER_AUTOMATCH_TYPE 훅이 매칭 시작을 확인한 뒤 소비한다
-            -- only the 540 tier opts in; the hook consumes this mark once matching really starts
-            g.indun_panel_understaff_req = nil
-            if indun_type == 2001 and g.indun_panel_settings.etc.sin_understaff_540 == 1 then
-                g.indun_panel_understaff_req = {
-                    indun_type = indun_type,
-                    time = os.time()
-                }
-            end
-            ReserveScript(string.format("ReqMoveToIndun(%d,%d)", 2, 0), 0.3)
-        end
     end
+    Indun_panel_entry_start("sin", indun_type, 2, "ui")
+end
+
+-- ============================================================
+-- 챌린지·분열 입장 진행기 / challenge & singularity entry stepper
+-- 🔴 예전에는 전부 **고정 시간**이었다: 구매 →1.0초→ 티켓 사용, →1.5초→ 입장 창 열기,
+--    →0.3초→ 입장 요청. 서버가 조금만 늦으면 ① 티켓이 아직 없어 사용이 조용히 건너뛰어지거나
+--    ② 창이 아직 안 열린 채 요청이 나가 묻혔다. 재시도도 없어서 "구매 후 가끔 자동매칭이
+--    안 눌린다"(사용자 2026-11-05).
+-- 🔑 시간 대신 **상태를 보고** 다음 단계로 간다.
+--    item  : 산 티켓이 인벤에 들어오면 사용      (구매했을 때만)
+--    count : 입장 횟수가 0 이 아니게 되면 다음
+--    ui    : 이 인던의 입장 창이 열리면 다음    (안 열리면 3초마다 다시 요청)
+--    match : 끝났는지 본다, 아니면 다시 요청
+--            자동매칭(2) = indunenter 의 AUTOMATCH_MODE == 'YES' 면 끝
+--                          (클라 indunenter.lua INDUNENTER_AUTOMATCH_TYPE 이 매칭 시작 때 찍는다)
+--                          2초마다 재요청, 4번까지
+--            솔로(1)     = 매칭 표시가 없다 → 입장 창이 닫히면(이동) 끝. 3초마다 재요청, 3번까지
+-- kind = "ch"(챌린지) / "sin"(분열). 틱 = 0.3초, 각 단계 10초(34틱) 넘으면 실패 메시지 +
+-- debug_log.txt 기록(실패했을 때만). 새 클릭은 gen 을 올려 이전 진행을 버린다
+-- waits on state, not time; a newer click bumps gen and drops the older run
+-- ============================================================
+-- 언어 선택(이 파일의 다른 곳과 같은 g.lang 판정) / same g.lang test as the rest of this file
+function Indun_panel_entry_t(kr, jp, en)
+    if g.lang == "Japanese" then
+        return jp
+    elseif g.lang == "kr" then
+        return kr
+    end
+    return en
+end
+
+-- 진행 기록은 메모리에만 쌓고, **실패했을 때만** debug_log.txt 에 쏟는다
+-- (입장할 때마다 사용자 파일에 쓰지 않는다)
+-- the trace stays in memory and is written to debug_log.txt only on failure
+function Indun_panel_entry_log(msg)
+    local st = g.ip_entry
+    if st then
+        st.trace = st.trace or {}
+        table.insert(st.trace, msg)
+    end
+end
+
+function Indun_panel_entry_flush(st)
+    for _, line in ipairs(st and st.trace or {}) do
+        g.log_to_file("[Indun Panel] " .. line)
+    end
+end
+
+function Indun_panel_entry_start(kind, indun_type, match_type, step, item_name)
+    if step == "item" and not item_name then
+        return
+    end
+    g.ip_entry_gen = (g.ip_entry_gen or 0) + 1
+    g.ip_entry = {
+        gen = g.ip_entry_gen,
+        kind = kind,
+        indun_type = indun_type,
+        match_type = match_type,
+        step = step,
+        item = item_name,
+        n = 0,
+        sent = 0
+    }
+    Indun_panel_entry_log(string.format("entry %s %d/%d: start step=%s item=%s", kind, indun_type, match_type, step,
+        tostring(item_name)))
+    if step == "ui" then
+        Indun_panel_entry_open_ui(g.ip_entry)
+    end
+    ReserveScript(string.format("Indun_panel_entry_tick(%d)", g.ip_entry_gen), 0.3)
+end
+
+function Indun_panel_entry_tick(gen)
+    local st = g.ip_entry
+    if st == nil or st.gen ~= gen then
+        return
+    end
+    st.n = st.n + 1
+    -- 에러로 사슬이 끊기면 조용히 멈춘 것처럼 보인다 → 파일에 남긴다
+    -- an error would silently end the chain, so it goes to the log
+    local ok, done = pcall(Indun_panel_entry_step, st)
+    if not ok then
+        Indun_panel_entry_flush(st)
+        g.log_to_file("[Indun Panel] entry: ERROR " .. tostring(done))
+        g.ip_entry = nil
+        return
+    end
+    if done then
+        g.ip_entry = nil
+        return
+    end
+    ReserveScript(string.format("Indun_panel_entry_tick(%d)", gen), 0.3)
+end
+
+function Indun_panel_entry_open_ui(st)
+    -- 챌린지는 파티가 없으면 먼저 만든다(예전 Indun_panel_enter_challenge 그대로)
+    -- challenge makes a party first when there is none, as before
+    if st.kind == "ch" and not session.party.GetPartyInfo() then
+        CREATE_PARTY_BTN()
+    end
+    ReqChallengeAutoUIOpen(st.indun_type)
+end
+
+function Indun_panel_entry_goto(st, step)
+    Indun_panel_entry_log(string.format("entry %s %d: %s -> %s (%.1fs)", st.kind, st.indun_type, st.step, step, st.n * 0.3))
+    st.step = step
+    st.n = 0
+    if step == "ui" then
+        Indun_panel_entry_open_ui(st)
+    end
+end
+
+function Indun_panel_entry_fail(st, kr, jp, en)
+    Indun_panel_entry_flush(st)
+    g.log_to_file(string.format("[Indun Panel] entry %s %d: FAIL at %s (%.1fs, sent %d)", st.kind, st.indun_type, st.step,
+        st.n * 0.3, st.sent))
+    local name = (st.kind == "sin") and Indun_panel_entry_t("분열", "分裂", "Singularity") or Indun_panel_entry_t("챌린지", "チャレンジ", "Challenge")
+    ui.SysMsg(name .. ": " .. Indun_panel_entry_t(kr, jp, en))
+    return true
+end
+
+function Indun_panel_entry_req(st)
+    st.sent = st.sent + 1
+    -- 4인 이하 자동 동의는 **540 분열(2001)만** 건다(사용자 지시 2026-09-15).
+    -- 표식만 남기고 INDUNENTER_AUTOMATCH_TYPE 훅이 매칭 시작을 확인한 뒤 소비한다
+    -- only the 540 tier opts in; the hook consumes this mark once matching really starts
+    g.indun_panel_understaff_req = nil
+    if st.indun_type == 2001 and g.indun_panel_settings.etc.sin_understaff_540 == 1 then
+        g.indun_panel_understaff_req = {
+            indun_type = st.indun_type,
+            time = os.time()
+        }
+    end
+    Indun_panel_entry_log(string.format("entry %s %d: ReqMoveToIndun(%d) #%d", st.kind, st.indun_type, st.match_type, st.sent))
+    ReqMoveToIndun(st.match_type, 0)
+end
+
+-- true = 끝(성공·포기 모두) / true ends the run
+function Indun_panel_entry_step(st)
+    local indun_type = st.indun_type
+    if st.step == "item" then
+        local cls = GetClass("Item", st.item)
+        local inv_item = cls and session.GetInvItemByType(cls.ClassID)
+        if inv_item and not inv_item.isLockState then
+            INV_ICON_USE(inv_item)
+            Indun_panel_entry_goto(st, "count")
+            return false
+        end
+        if st.n >= 34 then
+            return Indun_panel_entry_fail(st,
+                "구매한 입장권이 인벤토리에 들어오지 않았습니다",
+                "購入したチケットがインベントリに入りませんでした",
+                "the bought ticket never reached the inventory")
+        end
+        return false
+    end
+    if st.step == "count" then
+        if (tonumber(Indun_panel_get_entrance_count(indun_type, 4)) or 0) ~= 0 then
+            Indun_panel_entry_goto(st, "ui")
+            return false
+        end
+        if st.n >= 34 then
+            return Indun_panel_entry_fail(st,
+                "입장권을 썼지만 입장 횟수가 늘지 않았습니다",
+                "チケットを使いましたが入場回数が増えませんでした",
+                "used a ticket but the entry count did not go up")
+        end
+        return false
+    end
+    local frame = ui.GetFrame("indunenter")
+    local open = frame ~= nil and frame:IsVisible() == 1 and frame:GetUserIValue("INDUN_TYPE") == indun_type
+    local matching = open and frame:GetUserValue("AUTOMATCH_MODE") == "YES"
+    if st.step == "ui" then
+        if open then
+            if matching then
+                Indun_panel_entry_log(string.format("entry %s %d: already matching", st.kind, indun_type))
+                return true
+            end
+            -- 분열 체크를 끈 사용자는 창만 연다(예전과 같다) / unchecked = open the window only
+            if st.kind == "sin" and g.indun_panel_settings.etc.singularity_check ~= 0 then
+                Indun_panel_entry_log(string.format("entry %s %d: window open (auto match off)", st.kind, indun_type))
+                return true
+            end
+            Indun_panel_entry_goto(st, "match")
+            st.count0 = tonumber(Indun_panel_get_entrance_count(indun_type, 4)) or 0
+            Indun_panel_entry_req(st)
+            return false
+        end
+        if st.n % 10 == 0 then
+            Indun_panel_entry_open_ui(st)
+        end
+        if st.n >= 34 then
+            return Indun_panel_entry_fail(st,
+                "입장 창이 열리지 않았습니다",
+                "入場ウィンドウが開きませんでした",
+                "the entry window did not open")
+        end
+        return false
+    end
+    if st.step == "match" then
+        -- 창이 닫혔으면 사용자가 닫았거나 이동했다 → 끝. 솔로는 이것이 성공 신호다
+        -- a closed window means the user closed it or we moved; for solo that is success
+        if not open then
+            Indun_panel_entry_log(string.format("entry %s %d: window closed (%.1fs, sent %d)", st.kind, indun_type,
+                st.n * 0.3, st.sent))
+            return true
+        end
+        if matching then
+            Indun_panel_entry_log(string.format("entry %s %d: matching ok (%.1fs, sent %d)", st.kind, indun_type,
+                st.n * 0.3, st.sent))
+            return true
+        end
+        local solo = st.match_type ~= 2
+        local every, max_sent = 7, 4
+        if solo then
+            every, max_sent = 10, 3
+        end
+        if st.n % every == 0 then
+            -- 횟수가 0 이면 재요청하지 않는다. ① 처음부터 0 = 서버가 이미 거절 메시지를 띄웠다 → 조용히
+            -- 멈춘다(도배 방지) ② 요청 뒤 0 이 됨 = 소모됐다 → 들어간 것으로 본다(솔로는 창이 닫히기 전에
+            -- 횟수가 먼저 줄 수 있다)
+            -- zero entries: never resend. zero from the start = refused already; dropped to zero = entered
+            if (tonumber(Indun_panel_get_entrance_count(indun_type, 4)) or 0) == 0 then
+                Indun_panel_entry_log(string.format("entry %s %d: count 0 (was %s) -> stop", st.kind, indun_type,
+                    tostring(st.count0)))
+                return true
+            end
+            if st.sent >= max_sent then
+                return Indun_panel_entry_fail(st,
+                    "입장 요청이 받아들여지지 않았습니다. 입장 창에서 직접 눌러 주세요",
+                    "入場リクエストが通りませんでした。入場ウィンドウで押してください",
+                    "the entry request did not go through. Please press it in the entry window")
+            end
+            Indun_panel_entry_req(st)
+        end
+        return false
+    end
+    return true
 end
 
 -- 자동매칭이 시작되면 엔진이 이 함수를 부른다(창을 열 때도 indun_type 0 으로 한 번 온다).
