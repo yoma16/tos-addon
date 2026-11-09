@@ -62,12 +62,13 @@
 -- 1.2.4 "IP: new archaeology icon - left-click opens the relic shop from anywhere, right-click walks you to Archaeologist Airine (Klaipeda). Archeology Helper updated for the reworked archaeology (one region, four dig points, 70 detector uses): all seven distance messages now draw a coloured circle (the closest ones were ignored before), and the header shows tries used / max, points found and dig permits held"
 -- 1.2.5 "SQ: abandoning a quest now clears its shortcut. The release call passed the quest id as the third argument to a function that takes one, so it removed a key named 'nil' and the shortcut stayed on screen - this dates back to the original. Since the KR client update of 2026-11-03 (rev 409316) abandoning only sends a request and the server confirms it with QUEST_ABANDON_CONFIRM; on such clients the saved NPC is now released on that confirmation (keyed by the quest state before the abandon), so a refused abandon no longer drops the save. Older clients keep releasing at request time"
 -- 1.2.6 "IP: challenge and singularity entry no longer miss the auto-match click after buying a ticket. Each step used to run after a fixed delay (use the ticket 1.0s after buying, open the window at 1.5s, request 0.3s later) with no retry, so a slow server reply skipped a step. Entry now waits for each state instead - the bought ticket arriving, the entry count rising, the entry window opening, and matching actually starting (solo: the window closing) - and re-sends the request when it does not take. A step that does not finish within 10 seconds shows a message and writes the trace to debug_log.txt"
+-- 1.2.7 "IP: the understaffed-entry auto-allow now works for every auto-match entry - 540/560 Singularity and 560 Challenge (party) - instead of 540 Singularity only. The setting keeps its place and saved value; its label and the confirmation now name the dungeon. CCH: the auto warehouse close after taking a set now really closes the warehouse window - it used to leave the window up, which kept inventory right-click bound to warehouse deposit and blocked right-click card equip until ESC"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.2.6"
+local ver = "1.2.7"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -3832,9 +3833,11 @@ function Indun_panel_setting_frame_open() -- Indun_list_viewer_save_current_char
         jp = "チェックすると網掛け表示",
         en = "Check to display shading"
     }, {
+        -- 키 이름은 옛 것(540 전용 시절) 그대로 둔다 — 바꾸면 켜 둔 설정이 초기화된다
+        -- the key keeps its 540-only era name so saved settings carry over
         name = "sin_understaff_540",
-        jp = "540分裂: 4人以下入場に自動同意",
-        en = "540 Singularity: auto-allow understaffed entry"
+        jp = "分裂・チャレンジ: 4人以下入場に自動同意",
+        en = "Singularity / Challenge: auto-allow understaffed entry"
     }}
     local check_y = line2_y + IP_BTN_GAP + ip_s(5)
     local check_pitch = ip_s(35)
@@ -4970,11 +4973,13 @@ end
 
 function Indun_panel_entry_req(st)
     st.sent = st.sent + 1
-    -- 4인 이하 자동 동의는 **540 분열(2001)만** 건다(사용자 지시 2026-09-15).
+    -- 4인 이하 자동 동의는 **자동매칭 입장 전부**(560 챌린지 1007 · 540 분열 2001 · 560 분열 2003)에
+    -- 건다(사용자 지시 2026-11-05. 그 전엔 540 분열만). 인던이 그 입장을 지원하는지는
+    -- Indun_panel_understaff_allow 가 EnableUnderStaffEnter 로 본다(솔로 1004/1006 은 NO).
     -- 표식만 남기고 INDUNENTER_AUTOMATCH_TYPE 훅이 매칭 시작을 확인한 뒤 소비한다
-    -- only the 540 tier opts in; the hook consumes this mark once matching really starts
+    -- every auto-match entry opts in; the hook consumes this mark once matching really starts
     g.indun_panel_understaff_req = nil
-    if st.indun_type == 2001 and g.indun_panel_settings.etc.sin_understaff_540 == 1 then
+    if st.match_type == 2 and g.indun_panel_settings.etc.sin_understaff_540 == 1 then
         g.indun_panel_understaff_req = {
             indun_type = st.indun_type,
             time = os.time()
@@ -5138,9 +5143,13 @@ function Indun_panel_understaff_allow()
     ReqUnderstaffEnterAllowMode()
     INDUNENTER_INIT_MY_INFO(indunenter, 'YES')
     INDUNENTER_UNDERSTAFF_BTN_ENABLE(indunenter, 0)
+    local nm = ({[2001] = {"540分裂", "540 Singularity"},
+                 [2003] = {"560分裂", "560 Singularity"},
+                 [1007] = {"560チャレンジ", "560 Challenge"}})[indun_type]
+        or {"分裂・チャレンジ", "Singularity / Challenge"}
     ui.SysMsg(g.lang == "Japanese" and
-        string.format("540分裂: 最小%d人マッチング(4人以下入場)に自動で同意しました", min_member) or
-        string.format("540 Singularity: automatically allowed understaffed entry (min %d)", min_member))
+        string.format("%s: 最小%d人マッチング(4人以下入場)に自動で同意しました", nm[1], min_member) or
+        string.format("%s: automatically allowed understaffed entry (min %d)", nm[2], min_member))
 end
 
 -- 레이드 입장권 표. **여기 적힌 순서는 우선순위가 아니다** —
@@ -7930,13 +7939,17 @@ function Cc_helper_end_of_operation(btn, is_mcc)
     if monstercardslot:IsVisible() == 1 and not is_mcc then
         monstercardslot:RunUpdateScript("MONSTERCARDSLOT_CLOSE", 0.5)
     end
-    local accountwarehouse = ui.GetFrame("accountwarehouse")
+    -- 창을 닫으면 닫기 훅이 cch 버튼을 지운다 → 이름은 먼저 읽어 둔다
+    -- read the name first: closing the warehouse removes the cch buttons
+    local btn_name = btn:GetName()
     if g.cc_helper_settings.etc.wh_close == 1 and not is_mcc then
-        ACCOUNTWAREHOUSE_CLOSE()
+        -- 🔴 `ACCOUNTWAREHOUSE_CLOSE()` 를 직접 부르면 창은 화면에 남고 정리만 돈다 →
+        --    인벤 우클릭이 창고 입고로 다시 걸려 카드 우클릭 장착이 먹통(ESC 로만 풀림)
+        -- calling the CloseScp directly left the frame visible with its state torn down
+        ui.CloseFrame("accountwarehouse")
     elseif is_mcc == 1 then
         Monster_card_changer_monstercardpreset_open(1)
     end
-    local btn_name = btn:GetName()
     if btn_name == "cch_out_btn" then
         local save_clsid = g.cc_helper_settings[g.cid].items["pet"].clsid
         if save_clsid ~= 0 then
