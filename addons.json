@@ -22,14 +22,14 @@
     "tags": ["yomae", "cupole", "addons", "toggle cupole potion", "toggle", "potion", "요매", "yoma16", "큐폴"]
   },
   {
-    "tosversion" : "20261109",
+    "tosversion" : "20261111",
     "name": "New Nexus Addons",
     "file": "new_nexus_addons",
     "extension": "ipf",
-    "fileVersion": "v1.2.7",
-    "releaseTag": "new_nexus_addons_v-1.2.7",
+    "fileVersion": "v1.2.8",
+    "releaseTag": "new_nexus_addons_v-1.2.8",
     "unicode": "⛄",
-    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.2.7: CCH - 세트를 꺼낸 뒤 창고 자동 닫기가 창을 남겨 카드 우클릭 장착이 막히던 문제 수정. 인던 패널 - 4인 이하 입장 자동 동의를 분열·챌린지 자동매칭 전부로 확대. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.2.7: CCH - fixed the auto warehouse close leaving the window open and blocking right-click card equip. Indun Panel - understaffed-entry auto-allow now covers every Singularity / Challenge auto-match. <br>norisanのNexus Addonsフレームワークのyomaeフォーク。 <br>v1.2.7: CCH - セット搬出後の倉庫自動クローズでウィンドウが残り、カードの右クリック装着ができなかった問題を修正。インダンパネル - 4人以下入場の自動同意を分裂・チャレンジの自動マッチング全部に拡大。",
+    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.2.8: 11/10 KR 패치 대응 - 팀 창고 자동 넣기(AWH·CCH·몬스터 카드 교체)가 서버에서 거부되던 문제 수정. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.2.8: KR client update (2026-11-10) - fixed team warehouse deposits (AWH, CCH, monster card changer) being rejected by the server. <br>norisan の Nexus Addons フレームワークの yomae フォーク。 <br>v1.2.8: 11/10 KR パッチ対応 - チーム倉庫への自動預け入れ(AWH・CCH・モンスターカード交換)がサーバーに拒否される問題を修正。",
     "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
   },
   {
