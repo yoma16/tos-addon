@@ -63,12 +63,13 @@
 -- 1.2.5 "SQ: abandoning a quest now clears its shortcut. The release call passed the quest id as the third argument to a function that takes one, so it removed a key named 'nil' and the shortcut stayed on screen - this dates back to the original. Since the KR client update of 2026-11-03 (rev 409316) abandoning only sends a request and the server confirms it with QUEST_ABANDON_CONFIRM; on such clients the saved NPC is now released on that confirmation (keyed by the quest state before the abandon), so a refused abandon no longer drops the save. Older clients keep releasing at request time"
 -- 1.2.6 "IP: challenge and singularity entry no longer miss the auto-match click after buying a ticket. Each step used to run after a fixed delay (use the ticket 1.0s after buying, open the window at 1.5s, request 0.3s later) with no retry, so a slow server reply skipped a step. Entry now waits for each state instead - the bought ticket arriving, the entry count rising, the entry window opening, and matching actually starting (solo: the window closing) - and re-sends the request when it does not take. A step that does not finish within 10 seconds shows a message and writes the trace to debug_log.txt"
 -- 1.2.7 "IP: the understaffed-entry auto-allow now works for every auto-match entry - 540/560 Singularity and 560 Challenge (party) - instead of 540 Singularity only. The setting keeps its place and saved value; its label and the confirmation now name the dungeon. CCH: the auto warehouse close after taking a set now really closes the warehouse window - it used to leave the window up, which kept inventory right-click bound to warehouse deposit and blocked right-click card equip until ESC"
+-- 1.2.8 "Team warehouse deposits work again after the KR client update of 2026-11-10 (rev 411246), which made the server reject a deposit aimed at a slot already holding another item. AWH (auto deposit, right-click, Shift+right-click amount), CCH (set, gem and card deposit) and the monster card changer now pick the slot the way the client does - the stack slot of the same item, else a free slot - instead of guessing it from the tab counter"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.2.7"
+local ver = "1.2.8"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -7172,7 +7173,7 @@ function Cc_helper_inv_to_warehouse(in_btn)
                     end
                 end
                 if Cc_helper_checkvalid(inv_item) then
-                    local goal_index = Cc_helper_get_goal_index()
+                    local goal_index = Cc_helper_get_goal_index(iesid)
                     local item_cls = GetClassByType("Item", g.cc_helper_settings[g.cid].items[key].clsid)
                     local item_name = item_cls.Name
                     local log = g.lang == "Japanese" and "倉庫に格納しました" .. "：[" .. "{#EE82EE}" ..
@@ -7400,7 +7401,7 @@ function Cc_helper_gem_inv_to_warehouse(in_btn)
         local handle = accountwarehouse:GetUserIValue("HANDLE")
         local inv_item = session.GetInvItemByGuid(gem_data.iesid)
         if inv_item then
-            local goal_index = Cc_helper_get_goal_index()
+            local goal_index = Cc_helper_get_goal_index(gem_data.iesid)
             local log = g.lang == "Japanese" and "倉庫に格納しました：[{#EE82EE}" .. gem_data.name ..
                             "{#FFFF00}]×{#EE82EE}1" or "Item to warehousing：[{#EE82EE}" .. gem_data.name ..
                             "{#FFFF00}]×{#EE82EE}1"
@@ -8083,34 +8084,10 @@ function Cc_helper_checkvalid(inv_item)
     return true
 end
 
-function Cc_helper_get_goal_index()
-    local acc_obj = GetMyAccountObj()
-    local base_count = acc_obj.BasicAccountWarehouseSlotCount + acc_obj.MaxAccountWarehouseCount +
-                           acc_obj.AccountWareHouseExtend + acc_obj.AccountWareHouseExtendByItem
-    local tab_index = {4, 3, 2, 1, 0}
-    local accountwarehouse = ui.GetFrame("accountwarehouse")
-    local tab = GET_CHILD(accountwarehouse, "accountwarehouse_tab")
-    local slotset = GET_CHILD_RECURSIVELY(accountwarehouse, "slotset")
-    for index = 1, #tab_index do
-        local i = tab_index[index]
-        tab:SelectTab(i)
-        if i > 0 and session.loginInfo.IsPremiumState(ITEM_TOKEN) then
-            local itemcnt = GET_CHILD_RECURSIVELY(accountwarehouse, "itemcnt")
-            local num_str = string.match(itemcnt:GetText(), "{@st42}(%d+)/")
-            local left = tonumber(num_str)
-            if left < 70 then
-                return ((i - 1) * 70) + base_count + ADDITIONAL_SLOT_COUNT_BY_TOKEN + left + 1
-            end
-        else
-            for j = 1, base_count do
-                local slot = slotset:GetSlotByIndex(j)
-                AUTO_CAST(slot)
-                if slot:GetIcon() == nil then
-                    return j
-                end
-            end
-        end
-    end
+-- 팀 창고에 넣을 칸 → Another_warehouse_get_goal_index 와 같다(rev 411246 대응)
+-- same goal rule as AWH (see Another_warehouse_get_goal_index)
+function Cc_helper_get_goal_index(iesid)
+    return Another_warehouse_get_goal_index(iesid)
 end
 -- cc_helper ここまで
 
@@ -11572,34 +11549,48 @@ function Another_warehouse_item_count()
     return return_cnt
 end
 
-function Another_warehouse_get_goal_index()
-    local acc_obj = GetMyAccountObj()
-    local base_count = acc_obj.BasicAccountWarehouseSlotCount + acc_obj.MaxAccountWarehouseCount +
-                           acc_obj.AccountWareHouseExtend + acc_obj.AccountWareHouseExtendByItem
-    local tab_index = {4, 3, 2, 1, 0}
-    local accountwarehouse = ui.GetFrame('accountwarehouse')
-    local tab = GET_CHILD(accountwarehouse, "accountwarehouse_tab")
-    local slotset = GET_CHILD_RECURSIVELY(accountwarehouse, "slotset")
-    for index = 1, #tab_index do
-        local i = tab_index[index]
-        tab:SelectTab(i)
-        if i > 0 and session.loginInfo.IsPremiumState(ITEM_TOKEN) then
-            local itemcnt = GET_CHILD_RECURSIVELY(accountwarehouse, "itemcnt")
-            local num_str = string.match(itemcnt:GetText(), "{@st42}(%d+)/")
-            local left = tonumber(num_str)
-            if left < 70 then
-                return ((i - 1) * 70) + base_count + left + 1
+-- 🔴 팀 창고에 넣을 칸(goal) — KR rev 411246(2026-11-10)부터 서버가 **다른 아이템이 있는 칸이면 거부**한다
+--    (새 메시지 AccountWarehouseSlotOccupied). 예전 코드는 탭 글자·슬롯 아이콘으로 칸을 어림했고 서버가 틀린 칸을
+--    무시해 줘서 돌아갔다 → 패치 후 자동 넣기가 전부 실패. 클라 resolve_put_goal(item, nil) 과 같은 규칙:
+--    같은 종류 묶음이 있으면 그 칸, 없으면 쓸 수 있는 빈 칸. 탭 순서는 예전처럼 마지막 탭부터(4→0).
+--    창고 목록은 서버 응답 뒤에야 바뀌므로 방금 보낸 빈 칸은 2초 동안 다시 고르지 않는다.
+-- goal slot for a team-warehouse put. Since KR rev 411246 the server rejects an occupied goal slot,
+-- so mirror the client rule: same-class stack slot, else a usable empty slot (last tab first).
+function Another_warehouse_get_goal_index(iesid)
+    local inv_item = iesid and session.GetInvItemByGuid(iesid)
+    local cls_id = inv_item and GetIES(inv_item:GetObject()).ClassID
+    local stackable = cls_id ~= nil and geItemTable.IsStack(cls_id) == 1
+    local item_list = session.GetEtcItemList(IT_ACCOUNT_WAREHOUSE)
+    local guid_list = item_list:GetGuidList()
+    local used = {}
+    for i = 0, guid_list:Count() - 1 do
+        local wh_item = item_list:GetItemByGuid(guid_list:Get(i))
+        if wh_item then
+            if stackable and wh_item.type == cls_id then
+                return wh_item.invIndex
             end
-        else
-            for j = 1, base_count do
-                local slot = slotset:GetSlotByIndex(j)
-                AUTO_CAST(slot)
-                if slot:GetIcon() == nil then
-                    return j
+            used[wh_item.invIndex] = true
+        end
+    end
+    local per_tab = account_warehouse.get_max_slot_per_tab()
+    local max_tab = account_warehouse.get_max_tab()
+    local open_count = session.barrack.GetMyAccount():GetAccountWarehouseSlotCount()
+    local has_token = session.loginInfo.IsPremiumState(ITEM_TOKEN) == true
+    local now = imcTime.GetAppTime()
+    g.awh_goal_hold = g.awh_goal_hold or {}
+    for tab = max_tab, 0, -1 do
+        if tab == 0 or has_token then
+            local last = tab == 0 and math.min(per_tab, open_count) or per_tab
+            for index = tab * per_tab, tab * per_tab + last - 1 do
+                local held = g.awh_goal_hold[index]
+                if not used[index] and not (held and now - held < 2) then
+                    g.awh_goal_hold[index] = now
+                    return index
                 end
             end
         end
     end
+    return nil
 end
 
 function Another_warehouse_check_valid(inv_item)
@@ -11689,6 +11680,10 @@ function Another_warehouse_inv_rbtn(item_obj, slot)
             end
         end
         if inv_item.count > 1 or geItemTable.IsStack(obj.ClassID) == 1 then
+            -- 🔴 rev 411246: 클라 EXEC 가 "PUT_DROP_INDEX"(드롭한 칸)를 읽는다. 안 정하면 0 = 0번 칸에 넣으려다
+            --    "이미 아이템이 있는 칸" 으로 거부된다 → -1(칸 안 고름 = 묶음 칸 또는 빈 칸). 옛 클라는 무시
+            -- the new client EXEC reads PUT_DROP_INDEX (unset = 0 = slot 0, rejected if occupied); -1 = no drop slot
+            accountwarehouse:SetUserValue("PUT_DROP_INDEX", -1)
             INPUT_NUMBER_BOX(accountwarehouse, ScpArgMsg("InputCount"), "EXEC_PUT_ITEM_TO_ACCOUNT_WAREHOUSE", max_cnt,
                 1, max_cnt, nil, iesid)
         else
@@ -11891,7 +11886,7 @@ end
 
 function Another_warehouse_putitem(inv_item, iesid, count)
     local item_obj = GetIES(inv_item:GetObject())
-    local goal_index = Another_warehouse_get_goal_index()
+    local goal_index = Another_warehouse_get_goal_index(iesid)
     if Another_warehouse_check_valid(inv_item) then
         local accountwarehouse = ui.GetFrame("accountwarehouse")
         local handle = accountwarehouse:GetUserIValue("HANDLE")
@@ -12196,7 +12191,7 @@ function Another_warehouse_item_put(awh)
         return 0
     end
     local handle = accountwarehouse:GetUserIValue("HANDLE")
-    local goal_index = Another_warehouse_get_goal_index()
+    local goal_index = Another_warehouse_get_goal_index(item_data.iesid)
     local put_count = item_data.count
     if put_count > inv_item.count then
         put_count = inv_item.count
@@ -27969,7 +27964,8 @@ function Monster_card_changer_put_inv_to_warehouse(monster_card_changer)
     end
     local inv_item = session.GetInvItemList():GetItemByGuid(guid)
     if inv_item then
-        item.PutItemToWarehouse(IT_ACCOUNT_WAREHOUSE, guid, 1, accountwarehouse:GetUserIValue("HANDLE"), nil)
+        item.PutItemToWarehouse(IT_ACCOUNT_WAREHOUSE, guid, 1, accountwarehouse:GetUserIValue("HANDLE"),
+            Another_warehouse_get_goal_index(guid))
     else
         table.remove(g.monster_card_changer_cardlist, 1)
     end
