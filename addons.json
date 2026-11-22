@@ -22,14 +22,14 @@
     "tags": ["yomae", "cupole", "addons", "toggle cupole potion", "toggle", "potion", "요매", "yoma16", "큐폴"]
   },
   {
-    "tosversion" : "20261111",
+    "tosversion" : "20261122",
     "name": "New Nexus Addons",
     "file": "new_nexus_addons",
     "extension": "ipf",
-    "fileVersion": "v1.2.8",
-    "releaseTag": "new_nexus_addons_v-1.2.8",
+    "fileVersion": "v1.2.9",
+    "releaseTag": "new_nexus_addons_v-1.2.9",
     "unicode": "⛄",
-    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.2.8: 11/10 KR 패치 대응 - 팀 창고 자동 넣기(AWH·CCH·몬스터 카드 교체)가 서버에서 거부되던 문제 수정. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.2.8: KR client update (2026-11-10) - fixed team warehouse deposits (AWH, CCH, monster card changer) being rejected by the server. <br>norisan の Nexus Addons フレームワークの yomae フォーク。 <br>v1.2.8: 11/10 KR パッチ対応 - チーム倉庫への自動預け入れ(AWH・CCH・モンスターカード交換)がサーバーに拒否される問題を修正。",
+    "description": "norisan의 Nexus Addons 프레임워크 yomae 포크. <br>v1.2.9: 버그 수정 - 기능을 끄면 경매장 수령·채널 이동이 안 되던 문제, 레이드 A/S·H 자동매칭, JSR 오늘의 보스, 팀 창고 잠긴 칸, 서브맵 위치, 보조 퀵슬롯 툴팁. <br>yomae fork of norisan's Nexus Addons framework. <br>v1.2.9: Bug fixes - market collect / channel move dead after turning a feature off, raid A/S/H auto-match, JSR boss, team warehouse locked slot, Sub Map position, Sub Slotset tooltips. <br>norisan の Nexus Addons フレームワークの yomae フォーク。 <br>v1.2.9: 不具合修正 - 機能オフ後にマーケット受取・チャンネル移動が効かない問題、レイド A/S/H 自動マッチング、JSR ボス、チーム倉庫ロック枠、サブマップ位置、サブスロットのツールチップ。",
     "tags": ["yomae", "nexus", "ajinori", "new nexus", "요매"]
   },
   {

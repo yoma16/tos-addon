@@ -64,12 +64,13 @@
 -- 1.2.6 "IP: challenge and singularity entry no longer miss the auto-match click after buying a ticket. Each step used to run after a fixed delay (use the ticket 1.0s after buying, open the window at 1.5s, request 0.3s later) with no retry, so a slow server reply skipped a step. Entry now waits for each state instead - the bought ticket arriving, the entry count rising, the entry window opening, and matching actually starting (solo: the window closing) - and re-sends the request when it does not take. A step that does not finish within 10 seconds shows a message and writes the trace to debug_log.txt"
 -- 1.2.7 "IP: the understaffed-entry auto-allow now works for every auto-match entry - 540/560 Singularity and 560 Challenge (party) - instead of 540 Singularity only. The setting keeps its place and saved value; its label and the confirmation now name the dungeon. CCH: the auto warehouse close after taking a set now really closes the warehouse window - it used to leave the window up, which kept inventory right-click bound to warehouse deposit and blocked right-click card equip until ESC"
 -- 1.2.8 "Team warehouse deposits work again after the KR client update of 2026-11-10 (rev 411246), which made the server reject a deposit aimed at a slot already holding another item. AWH (auto deposit, right-click, Shift+right-click amount), CCH (set, gem and card deposit) and the monster card changer now pick the slot the way the client does - the stack slot of the same item, else a free slot - instead of guessing it from the tab counter"
+-- 1.2.9 "Bug fixes. Framework: a relay-only hook whose handler is not registered this entry (feature turned off, or its init stopped early) now runs the game's original function instead of swallowing the call - this could leave market cabinet collect and channel move doing nothing until the game was restarted; a relayed call nobody picks up within 0.1s also falls back to the original. IP: raid A/S buttons and the Indun List Viewer entry go through the entry stepper (press auto-match only once the window is really open) instead of a fixed 0.3s delay; H entry for dungeons the client now opens server-side (e.g. the earring raid) uses the same request as the game, so auto-match works; the JSR row shows today's boss icon and a tooltip (the panel now asks the server); the 560 Singularity ticket tooltips list the real order (untradable before buying). AWH: a stack in a locked team-warehouse slot is no longer chosen as the deposit slot. Sub Map: changing a setting no longer resets the position, a saved spot with one zero axis is kept, dragging in minimap mode no longer overwrites the normal spot. Sub Slotset: equipment with per-item options (earrings, icor) shows the registered item's own tooltip"
 
 
 local addon_name = "_NEXUS_ADDONS"
 local addon_name_lower = string.lower(addon_name)
 local author = "yomae"
-local ver = "1.2.8"
+local ver = "1.2.9"
 
 _G["ADDONS"] = _G["ADDONS"] or {}
 _G["ADDONS"][author] = _G["ADDONS"][author] or {}
@@ -144,9 +145,39 @@ function g.setup_hook_and_event(my_addon, origin_func_name, my_func_name, bool)
         local original_results
         if bool == true then
             original_results = {origin_func(...)}
+        elseif not g.REGISTER[origin_func_name .. my_func_name] then
+            -- 🔴 받는 쪽이 이번 입장에 등록되지 않았다 → 원본을 그대로 부른다.
+            --    bool == false 인 훅은 원본을 부르지 않고 메시지만 보낸다(받는 핸들러가 원본을 부른다).
+            --    그런데 이 훅은 _G 에 남아 게임을 끌 때까지 살고, 핸들러 등록은 맵을 옮길 때마다 사라진다
+            --    (g.REGISTER 를 입장마다 비우는 이유). 그 기능을 껐거나 그 on_init 이 도중에 끝나면
+            --    훅만 남아 게임 자체 버튼이 먹통이 된다 — 채널 이동(SELECT_ZONE_MOVE_CHANNEL),
+            --    경매장 수령(_CABINET_ITEM_BUY) 등
+            -- a relay-only hook outlives its handler: with no handler registered this entry, run the original
+            if g.hook_noted == nil or g.hook_noted[origin_func_name] ~= true then
+                g.hook_noted = g.hook_noted or {}
+                g.hook_noted[origin_func_name] = true
+                g.log_to_file("[hook] " .. origin_func_name .. " has no handler this entry -> original")
+            end
+            return origin_func(...)
         end
         g.ARGS = g.ARGS or {}
         g.ARGS[origin_func_name] = {...}
+        if bool ~= true then
+            -- 등록은 돼 있는데도 메시지가 아무에게도 안 닿는 경우의 안전망: 핸들러가 인자를 가져가면
+            -- (g.get_event_args) 표시가 지워진다. 0.1초 넘게 남아 있으면 원본을 대신 부른다.
+            -- HOOK_WAIT[이름] = 아직 아무도 안 가져간 첫 호출의 시각. 예약은 이름마다 하나만 건다
+            -- (BUFF_SEPARATED_TIME_UPDATE 처럼 1초에 여러 번 불리는 훅이 예약을 쌓지 않게)
+            -- safety net: a call nobody picked up for 0.1s gets the original; one pending timer per name
+            g.HOOK_WAIT = g.HOOK_WAIT or {}
+            if g.HOOK_WAIT[origin_func_name] == nil then
+                g.HOOK_WAIT[origin_func_name] = imcTime.GetAppTimeMS()
+            end
+            g.HOOK_TIMER = g.HOOK_TIMER or {}
+            if g.HOOK_TIMER[origin_func_name] ~= true then
+                g.HOOK_TIMER[origin_func_name] = true
+                ReserveScript(string.format("_nexus_addons_hook_fallback('%s')", origin_func_name), 0.15)
+            end
+        end
         imcAddOn.BroadMsg(origin_func_name)
         if original_results then
             return table.unpack(original_results)
@@ -162,11 +193,41 @@ function g.setup_hook_and_event(my_addon, origin_func_name, my_func_name, bool)
 end
 
 function g.get_event_args(origin_func_name)
+    -- 핸들러가 이 호출을 가져갔다 → 안전망(위 hooked_function)을 푼다 / a handler took the call
+    if g.HOOK_WAIT ~= nil then
+        g.HOOK_WAIT[origin_func_name] = nil
+    end
     local args = g.ARGS[origin_func_name]
     if args then
         return table.unpack(args)
     end
     return nil
+end
+
+-- 훅 안전망: 0.1초 넘게 아무 핸들러도 인자를 가져가지 않은 호출은 원본을 대신 부른다
+-- hook safety net: run the original for a relayed call no handler picked up within 0.1s
+function _nexus_addons_hook_fallback(name)
+    if g.HOOK_TIMER ~= nil then
+        g.HOOK_TIMER[name] = nil
+    end
+    local since = g.HOOK_WAIT ~= nil and g.HOOK_WAIT[name] or nil
+    if since == nil then
+        return -- 핸들러가 가져갔다 / a handler took it
+    end
+    if imcTime.GetAppTimeMS() - since < 100 then
+        -- 방금 온 호출이다. 핸들러에게 시간을 더 준다 / a fresh call: give its handler more time
+        g.HOOK_TIMER = g.HOOK_TIMER or {}
+        g.HOOK_TIMER[name] = true
+        ReserveScript(string.format("_nexus_addons_hook_fallback('%s')", name), 0.15)
+        return
+    end
+    g.HOOK_WAIT[name] = nil
+    local origin = g.FUNCS and g.FUNCS[name]
+    local args = g.ARGS and g.ARGS[name] or {}
+    g.log_to_file("[hook] nobody took " .. tostring(name) .. " -> original (fallback)")
+    if type(origin) == "function" then
+        pcall(origin, table.unpack(args))
+    end
 end
 
 function g.setup_hook(my_func, origin_func_name)
@@ -3008,8 +3069,14 @@ function indun_panel_on_init()
         Indun_panel_load_settings()
         Indun_panel_frame_init()
     end
+    -- 맵이 바뀌었으면 입장 진행기는 끝난 것이다. 1인 입장은 요청 직후 맵을 옮겨서 "창이 닫혔다"를 볼 틱이
+    -- 안 돌 수 있다 → 남은 진행 상태를 비운다
+    -- a map load ends any entry run; drop a leftover state
+    g.ip_entry = nil
     g.setup_hook_and_event(g.addon, "CHAT_SYSTEM", "Indun_panel_CHAT_SYSTEM", true)
     g.addon:RegisterMsg("ESCAPE_PRESSED", "Indun_panel_frame_init")
+    -- 보스 협동전 오늘의 보스 정보가 오면 JSR 줄의 아이콘·툴팁을 채운다 / fills the JSR row when the pattern arrives
+    g.addon:RegisterMsg("FIELD_BOSS_MONSTER_UPDATE", "Indun_panel_jsr_boss_update")
     if g.settings.indun_panel.use == 0 then
         ui.DestroyFrame(addon_name_lower .. "indun_panel")
         ui.DestroyFrame(addon_name_lower .. "indun_panel_map")
@@ -3046,6 +3113,9 @@ function Indun_panel_CHAT_SYSTEM(my_frame, my_msg)
 end
 
 function Indun_panel_INDUN_ALREADY_PLAYING(my_frame, my_msg)
+    -- 인자는 쓰지 않지만 "가져갔다" 는 표시를 남긴다(훅 안전망이 원본을 또 부르지 않게)
+    -- take the args anyway so the hook safety net does not run the original a second time
+    g.get_event_args(my_msg)
     if g.settings.indun_panel.use == 0 then
         g.FUNCS["INDUN_ALREADY_PLAYING"]()
         return
@@ -3071,6 +3141,12 @@ function Indun_panel_INDUN_ALREADY_PLAYING_dilay()
         end
         return
     else
+        -- 레이드 입장 진행기가 돌고 있으면 멈춘다: 3초마다 창을 다시 열면 이 확인 창이 계속 쌓인다
+        -- stop a running raid entry: re-opening the window every 3s would stack this prompt
+        if g.ip_entry ~= nil and g.ip_entry.kind == "raid" then
+            Indun_panel_entry_log(string.format("entry raid %d: already-playing prompt -> stop", g.ip_entry.indun_type))
+            g.ip_entry = nil
+        end
         local yes_scp = string.format("AnsGiveUpPrevPlayingIndun(%d)", 1)
         local no_scp = string.format("AnsGiveUpPrevPlayingIndun(%d)", 0)
         ui.MsgBox(ClMsg("IndunAlreadyPlaying_AreYouGiveUp"), yes_scp, no_scp)
@@ -4068,9 +4144,10 @@ function Indun_panel_frame_contents(configbtn)
                 AUTO_CAST(img_icon)
                 local icon_cls = nil
                 if key == "jsr" then
-                    local fieldbossPattern = session.fieldboss.GetPatternInfo()
-                    local icon_cls_name = fieldbossPattern.MonsterClassName
-                    icon_cls = GetClass("Monster", icon_cls_name)
+                    -- 오늘의 보스 아이콘·툴팁은 아래 Indun_panel_jsr_boss_apply 가 맡는다(이름 글자를 만든 뒤).
+                    -- 예전엔 여기서 GetPatternInfo 를 읽었는데 아무도 서버에 묻지 않아 늘 비어 있었다
+                    -- today's boss icon and tooltip are applied below, once the name text exists
+                    icon_cls = nil
                 elseif value.icon then
                     icon_cls = GetClassByType(value.icon[1], value.icon[2])
                 end
@@ -4088,6 +4165,12 @@ function Indun_panel_frame_contents(configbtn)
                 local font_tag = is_jp_mode and ip_f(16) or ip_f(18)
                 text:SetText(string.format("{ol}{#FFFFFF}%s%s", font_tag, display_name))
                 index = index + 1
+                if key == "jsr" then
+                    -- 이미 받아 둔 정보가 있으면 바로 그리고, 서버에 오늘 것을 다시 묻는다(응답이 오면 또 그린다)
+                    -- draw what we already have, then ask the server for today's boss
+                    Indun_panel_jsr_boss_apply()
+                    Indun_panel_jsr_boss_request()
+                end
                 if key == "challenge" then
                     local tooltip = g.lang == "Japanese" and
                                         IP_TIP_OL .. "左クリック: チャレンジマップの1週間分のスケジュール表示" or
@@ -4718,9 +4801,13 @@ function Indun_panel_singularity_frame(indun_panel, key, sub_key, indun_type, y,
                         IP_TIP_OL .. "{img %s 25 25 } Quantity in Inventory: %d{nl} {nl}"
         icon_text_high = string.format(fmt, item_cls.Icon, count)
     end
+    -- 툴팁을 실제 순서(Indun_panel_item_use_sin)에 맞췄다: 입장 횟수 → 기간제(24시간 이내 먼저)
+    -- → 거래불가 무기한 → 구매 → 거래 가능 무기한. 예전 툴팁은 거래불가를 빼고 적어 순서가 달라 보였다.
+    -- ⚠️ 순서를 바꿀 때는 이 두 툴팁도 같이 고칠 것
+    -- the tooltip now matches the real order: untradable non-expiring tickets go before buying
     local tooltip_high_tos = g.lang == "Japanese" and
-                                 IP_TIP_OL .. "優先順位{nl}1.24時間以内の期限付きチケット{nl}2.期限付きチケット{nl}3.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います){nl}4.期限の無いチケット" or
-                                 IP_TIP_OL .. "Priority{nl}1.Limited-time tickets (under 24 hours){nl}2.Limited-time tickets{nl}3.{img icon_item_Tos_Event_Coin 20 20}tickets(buy and use){nl}4.Tickets without an expiration date"
+                                 IP_TIP_OL .. "優先順位{nl}1.期限付き(24時間以内を先に){nl}2.取引不可{nl}3.{img icon_item_Tos_Event_Coin 20 20}チケット(買って使います){nl}4.期限なし" or
+                                 IP_TIP_OL .. "Priority{nl}1.Expiring (under 24 hours first){nl}2.Untradable{nl}3.{img icon_item_Tos_Event_Coin 20 20}tickets(buy and use){nl}4.Non-expiring"
     ticket_high_tos:SetText(text_high_tos)
     ticket_high_tos:SetTextTooltip(icon_text_high .. tooltip_high_tos)
     ticket_high_tos:SetEventScript(ui.LBUTTONUP, "Indun_panel_item_use_sin")
@@ -4733,8 +4820,8 @@ function Indun_panel_singularity_frame(indun_panel, key, sub_key, indun_type, y,
         ip_s(18), ip_s(18), Indun_panel_get_recipe_trade_count("PVP_MINE_41") or 0,
         Indun_panel_get_recipe_trade_count("PVP_MINE_42") or 0)
     local tooltip_high_pvp = g.lang == "Japanese" and
-                                 IP_TIP_OL .. "優先順位{nl}1.24時間以内の期限付きチケット{nl}2.期限付きチケット{nl}3.{img pvpmine_shop_btn_total 20 20}チケット(買って使います){nl}4.期限の無いチケット" or
-                                 IP_TIP_OL .. "Priority{nl}1.Limited-time tickets (under 24 hours){nl}2.Limited-time tickets{nl}3.{img pvpmine_shop_btn_total 20 20}tickets(buy and use){nl}4.Tickets without an expiration date"
+                                 IP_TIP_OL .. "優先順位{nl}1.期限付き(24時間以内を先に){nl}2.取引不可{nl}3.{img pvpmine_shop_btn_total 20 20}チケット(買って使います、日間 → 週間){nl}4.期限なし" or
+                                 IP_TIP_OL .. "Priority{nl}1.Expiring (under 24 hours first){nl}2.Untradable{nl}3.{img pvpmine_shop_btn_total 20 20}tickets(buy and use, daily then weekly){nl}4.Non-expiring"
     ticket_high_pvp:SetText(text_high_pvp)
     ticket_high_pvp:SetTextTooltip(icon_text_high .. tooltip_high_pvp)
     ticket_high_pvp:SetEventScript(ui.LBUTTONUP, "Indun_panel_item_use_sin")
@@ -4951,6 +5038,15 @@ function Indun_panel_entry_open_ui(st)
     if st.kind == "ch" and not session.party.GetPartyInfo() then
         CREATE_PARTY_BTN()
     end
+    -- 레이드(자동매칭·1인): 창을 여는 요청이 다르다. 1인은 파티가 없으면 먼저 만든다(예전 Indun_panel_enter_solo 그대로)
+    -- raids open through a different request; solo makes a party first, as before
+    if st.kind == "raid" then
+        if st.match_type == 1 and not session.party.GetPartyInfo() then
+            CREATE_PARTY_BTN()
+        end
+        ReqRaidAutoUIOpen(st.indun_type)
+        return
+    end
     ReqChallengeAutoUIOpen(st.indun_type)
 end
 
@@ -4968,6 +5064,9 @@ function Indun_panel_entry_fail(st, kr, jp, en)
     g.log_to_file(string.format("[Indun Panel] entry %s %d: FAIL at %s (%.1fs, sent %d)", st.kind, st.indun_type, st.step,
         st.n * 0.3, st.sent))
     local name = (st.kind == "sin") and Indun_panel_entry_t("분열", "分裂", "Singularity") or Indun_panel_entry_t("챌린지", "チャレンジ", "Challenge")
+    if st.kind == "raid" then
+        name = Indun_panel_entry_t("인던 입장", "インダン入場", "Dungeon entry")
+    end
     ui.SysMsg(name .. ": " .. Indun_panel_entry_t(kr, jp, en))
     return true
 end
@@ -4980,7 +5079,9 @@ function Indun_panel_entry_req(st)
     -- 표식만 남기고 INDUNENTER_AUTOMATCH_TYPE 훅이 매칭 시작을 확인한 뒤 소비한다
     -- every auto-match entry opts in; the hook consumes this mark once matching really starts
     g.indun_panel_understaff_req = nil
-    if st.match_type == 2 and g.indun_panel_settings.etc.sin_understaff_540 == 1 then
+    -- 레이드(A 버튼도 이 진행기를 탄다)에는 걸지 않는다 — 이 설정은 분열·챌린지용이다
+    -- raids also go through this stepper now, but the opt-in is for singularity / challenge only
+    if st.kind ~= "raid" and st.match_type == 2 and g.indun_panel_settings.etc.sin_understaff_540 == 1 then
         g.indun_panel_understaff_req = {
             indun_type = st.indun_type,
             time = os.time()
@@ -4988,6 +5089,25 @@ function Indun_panel_entry_req(st)
     end
     Indun_panel_entry_log(string.format("entry %s %d: ReqMoveToIndun(%d) #%d", st.kind, st.indun_type, st.match_type, st.sent))
     ReqMoveToIndun(st.match_type, 0)
+end
+
+-- 레이드 첫 요청을 0.2초 미뤄 보낸다(Indun_panel_entry_step 참고) / the delayed first raid request
+function Indun_panel_entry_req_delayed(gen)
+    local st = g.ip_entry
+    if st == nil or st.gen ~= gen or st.step ~= "match" or not st.wait_send then
+        return
+    end
+    st.wait_send = nil
+    -- 그 0.2초 사이에 창이 닫혔거나 다른 인던으로 바뀌었으면 보내지 않는다
+    -- skip when the window closed or switched to another dungeon in the meantime
+    local frame = ui.GetFrame("indunenter")
+    if frame == nil or frame:IsVisible() ~= 1 or frame:GetUserIValue("INDUN_TYPE") ~= st.indun_type then
+        Indun_panel_entry_log(string.format("entry raid %d: window gone before the delayed request -> stop", st.indun_type))
+        g.ip_entry = nil
+        return
+    end
+    st.n = 0
+    Indun_panel_entry_req(st)
 end
 
 -- true = 끝(성공·포기 모두) / true ends the run
@@ -5038,6 +5158,15 @@ function Indun_panel_entry_step(st)
             end
             Indun_panel_entry_goto(st, "match")
             st.count0 = tonumber(Indun_panel_get_entrance_count(indun_type, 4)) or 0
+            -- 레이드는 창이 뜬 것을 본 뒤 고정 0.2초를 더 기다렸다가 누른다. 자동매칭으로 인스턴스에 넘어가는
+            -- 순간 접속이 끊기는 일이 있었고, 창이 뜨자마자(같은 틱에) 요청을 보내는 것이 사람이 누를 때와
+            -- 다른 점이라 그 간격을 둔다. 그 사이에 다른 입장이 시작됐으면(gen 이 다르면) 예약은 아무것도 안 한다
+            -- raids: wait a fixed 0.2s after the window is seen open before sending the request
+            if st.kind == "raid" then
+                st.wait_send = true
+                ReserveScript(string.format("Indun_panel_entry_req_delayed(%d)", st.gen), 0.2)
+                return false
+            end
             Indun_panel_entry_req(st)
             return false
         end
@@ -5069,6 +5198,26 @@ function Indun_panel_entry_step(st)
         local every, max_sent = 7, 4
         if solo then
             every, max_sent = 10, 3
+        end
+        -- 레이드는 창이 뜬 뒤 한 번 + 3초 뒤 한 번만 보낸다. 횟수가 없으면 서버가 자기 거절 메시지를 띄우므로
+        -- 여러 번 보내면 그 메시지만 도배된다. 아래의 "입장 횟수 0" 판정도 쓰지 않는다 —
+        -- Indun_panel_get_entrance_count(…, 4) 는 챌린지·분열의 남은 횟수고, 레이드에서는 뜻이 다르다
+        -- raids: one request once the window is up, one retry 3s later, and no challenge-style count check
+        if st.kind == "raid" then
+            -- 미룬 첫 요청이 아직 안 나갔으면 기다린다 / the delayed first request has not gone out yet
+            if st.wait_send then
+                return false
+            end
+            if st.n % 10 == 0 then
+                if st.sent >= 2 then
+                    Indun_panel_entry_flush(st)
+                    g.log_to_file(string.format("[Indun Panel] entry raid %d: no answer after %d requests -> stop",
+                        indun_type, st.sent))
+                    return true
+                end
+                Indun_panel_entry_req(st)
+            end
+            return false
         end
         if st.n % every == 0 then
             -- 횟수가 0 이면 재요청하지 않는다. ① 처음부터 0 = 서버가 이미 거절 메시지를 띄웠다 → 조용히
@@ -5385,28 +5534,28 @@ function Indun_panel_enter_solo(indun_panel, ctrl, str, indun_type)
         ReqRaidAutoUIOpen(indun_type)
         return
     end
-    local pcparty = session.party.GetPartyInfo()
-    if not pcparty then
-        CREATE_PARTY_BTN()
-    end
-    ReqRaidAutoUIOpen(indun_type)
-    ReserveScript(string.format("ReqMoveToIndun(%d,%d)", 1, 0), 0.3)
+    -- 입장 진행기로 보낸다. 예전에는 창을 열라고 요청하고 무조건 0.3초 뒤 ReqMoveToIndun 을 보냈다 —
+    -- 서버 응답이 0.3초보다 늦으면 창이 아직 없을 때 요청이 나가 묻혀 자동매칭이 안 눌렸다.
+    -- 진행기는 창이 실제로 뜬 것을 보고 누른다(Indun_panel_entry_step)
+    -- routed through the entry stepper: it presses only after the entry window is really open
+    Indun_panel_entry_start("raid", indun_type, 1, "ui")
 end
 
 function Indun_panel_enter_auto(indun_panel, ctrl, str, indun_type)
-    ReqRaidAutoUIOpen(indun_type)
     local indun_cls = GetClassByType('Indun', indun_type)
-    if indun_cls then
-        local indun_min_rank = TryGetProp(indun_cls, 'PCRank')
-        local totaljobcount = session.GetPcTotalJobGrade()
-        if indun_min_rank ~= nil then
-            if indun_min_rank > totaljobcount and indun_min_rank ~= totaljobcount then
-                ui.SysMsg(ScpArgMsg('IndunEnterNeedPCRank', 'NEED_RANK', indun_min_rank))
-                return
-            end
-        end
-        ReserveScript(string.format("ReqMoveToIndun(%d,%d)", 2, 0), 0.3)
+    if not indun_cls then
+        ReqRaidAutoUIOpen(indun_type)
+        return
     end
+    local indun_min_rank = TryGetProp(indun_cls, 'PCRank')
+    local totaljobcount = session.GetPcTotalJobGrade()
+    if indun_min_rank ~= nil and indun_min_rank > totaljobcount then
+        -- 랭크가 모자라면 예전처럼 창만 열고 알린다 / below the rank: open the window only, as before
+        ReqRaidAutoUIOpen(indun_type)
+        ui.SysMsg(ScpArgMsg('IndunEnterNeedPCRank', 'NEED_RANK', indun_min_rank))
+        return
+    end
+    Indun_panel_entry_start("raid", indun_type, 2, "ui")
 end
 
 local function Indun_panel_induninfo_set_buttons(indun_type, ctrl)
@@ -5420,13 +5569,42 @@ local function Indun_panel_induninfo_set_buttons(indun_type, ctrl)
         local red_button_scp = TryGetProp(btn_info_cls, "RedButtonScp")
         ctrl:SetUserValue('MOVE_INDUN_CLASSID', indun_cls.ClassID)
         ctrl:SetEventScript(ui.LBUTTONUP, red_button_scp)
+        return indun_cls, btn_info_cls
     end
+end
+
+-- 🔴 불꽃의 기억(귀걸이 레이드) 등에서 H 로 열면 횟수가 남아도 자동매칭 버튼이 안 눌렸다.
+--    클라가 일부 던전의 입장을 서버 요청으로 바꿨다(indunInfo_button.ies 의 RedButtonAction).
+--    인던 정보창의 입장 버튼은 ReqIndunInfoButtonAction(인던, 버튼클래스, 1) 을 보내고 서버가 입장창을 열어 준다.
+--    SHOW_INDUNENTER_DIALOG 로 창만 띄우면 창은 뜨지만 자동매칭이 막힌다.
+--    해당: Raid Auto/Casual · Mythic · EarringRaid · SeasonEarringRaid · Level 던전 · BridgeWailing · DemonLair ·
+--    SanctuartyResonance. 일반 레이드 하드(Raid/Party)는 목록에 없어 예전 길 그대로다
+-- the client now opens these entry windows server-side; mirror its red-button action instead of a bare dialog
+local function Indun_panel_info_button_action(indun_cls, btn_cls)
+    local action = TryGetProp(btn_cls, "RedButtonAction", "None")
+    if action == nil or action == "None" or action == "" or type(ReqIndunInfoButtonAction) ~= "function" then
+        return false
+    end
+    -- 클라와 같은 제한 검사(PVP·레이어·레이드 필드 등). 막히면 클라가 메시지를 띄운다
+    -- same restriction check as the client; the client shows its own message when blocked
+    local action_cls = GetClass("induninfo_button_action", action)
+    if action_cls ~= nil and type(shared_induninfo_button) == "table" and
+        type(shared_induninfo_button.check_action_restrict) == "function" then
+        if shared_induninfo_button.check_action_restrict(nil, action_cls, indun_cls) == false then
+            return true
+        end
+    end
+    ReqIndunInfoButtonAction(indun_cls.ClassID, btn_cls.ClassID, 1)
+    return true
 end
 
 function Indun_panel_enter_hard(indun_panel, ctrl, str, indun_type)
     local indun_cls = GetClassByType("Indun", indun_type)
     if str == "false" then
-        Indun_panel_induninfo_set_buttons(indun_type, ctrl)
+        local i_cls, btn_cls = Indun_panel_induninfo_set_buttons(indun_type, ctrl)
+        if i_cls ~= nil and btn_cls ~= nil and Indun_panel_info_button_action(i_cls, btn_cls) then
+            return
+        end
         str = "true"
         if indun_type then
             ReserveScript(string.format("Indun_panel_enter_hard(nil,nil,'%s',%d)", str, indun_type), 0.5)
@@ -5708,6 +5886,68 @@ function Indun_panel_item_use(indun_panel, ctrl, str, indun_type)
             INV_ICON_USE(use_item)
             return
         end
+    end
+end
+
+-- 보스 협동전(JSR) 오늘의 보스: 서버에 묻고(30초에 한 번), 응답(FIELD_BOSS_MONSTER_UPDATE)이 오면 아이콘·툴팁을 그린다
+-- JSR today's boss: ask the server (at most every 30s) and draw the icon and tooltip when it answers
+function Indun_panel_jsr_boss_request()
+    if type(field_boss) ~= "table" or type(field_boss.RequestFieldBossPatternInfo) ~= "function" then
+        return
+    end
+    local now = imcTime.GetAppTime()
+    if g.ip_jsr_req_time ~= nil and (now - g.ip_jsr_req_time) < 30 then
+        return
+    end
+    g.ip_jsr_req_time = now
+    pcall(function()
+        field_boss.RequestFieldBossPatternInfo(geTime.GetServerSystemTime())
+    end)
+end
+
+function Indun_panel_jsr_boss_update(frame, msg)
+    Indun_panel_jsr_boss_apply()
+end
+
+function Indun_panel_jsr_boss_apply()
+    local indun_panel = ui.GetFrame(addon_name_lower .. "indun_panel")
+    if indun_panel == nil then
+        return
+    end
+    local img_icon = GET_CHILD(indun_panel, "img_iconjsr")
+    local text = GET_CHILD(indun_panel, "jsr")
+    if img_icon == nil then
+        return
+    end
+    AUTO_CAST(img_icon)
+    local ok, pattern = pcall(session.fieldboss.GetPatternInfo)
+    if not ok or pattern == nil then
+        return
+    end
+    local mon_name = pattern.MonsterClassName
+    if mon_name == nil or mon_name == "" or mon_name == "None" then
+        return
+    end
+    local mon_cls = GetClass("Monster", mon_name)
+    if mon_cls == nil then
+        return
+    end
+    img_icon:SetImage(mon_cls.Icon)
+    img_icon:SetEnableStretch(1)
+    img_icon:Resize(ip_s(20), ip_s(20)) -- SetImage 가 크기를 원본으로 되돌린다 / SetImage resets the size
+    -- 값(종족·방어 종류)은 클라 문구(ScpArgMsg)라 클라 언어로 나온다 / the values come from the client's own strings
+    local tip = IP_TIP_OL .. Indun_panel_entry_t("오늘의 보스", "今日のボス", "Today's boss") .. "{nl}" ..
+        "{#FFDD55}" .. Indun_panel_entry_t("이름", "名前", "Name") .. "{/}: " ..
+        dictionary.ReplaceDicIDInCompStr(mon_cls.Name) .. "{nl}" ..
+        "{#FFDD55}" .. Indun_panel_entry_t("종족", "種族", "Race") .. "{/}: " .. ScpArgMsg(pattern.RaceType) .. "{nl}" ..
+        "{#FFDD55}" .. Indun_panel_entry_t("방어 종류", "防御タイプ", "Armor") .. "{/}: " ..
+        ScpArgMsg(pattern.ArmorMaterial)
+    img_icon:EnableHitTest(1)
+    img_icon:SetTextTooltip(tip)
+    if text ~= nil then
+        AUTO_CAST(text)
+        text:EnableHitTest(1)
+        text:SetTextTooltip(tip)
     end
 end
 
@@ -11560,22 +11800,35 @@ function Another_warehouse_get_goal_index(iesid)
     local inv_item = iesid and session.GetInvItemByGuid(iesid)
     local cls_id = inv_item and GetIES(inv_item:GetObject()).ClassID
     local stackable = cls_id ~= nil and geItemTable.IsStack(cls_id) == 1
+    local per_tab = account_warehouse.get_max_slot_per_tab()
+    local max_tab = account_warehouse.get_max_tab()
+    local open_count = session.barrack.GetMyAccount():GetAccountWarehouseSlotCount()
+    local has_token = session.loginInfo.IsPremiumState(ITEM_TOKEN) == true
+    -- 🔴 기존 묶음이 잠긴 칸(0번 탭의 열린 칸 밖 / 토큰 없는 추가 탭)에 있으면 그 칸을 goal 로 보내면
+    --    서버가 CannotPutBecauseMaxSlot 으로 거부한다(클라 resolve_put_goal 도 같은 실수를 한다).
+    --    그런 묶음은 건너뛰고 빈 칸을 보낸다
+    -- a stack sitting in a locked slot is rejected as goal; skip it and fall back to an empty slot
+    local function usable(index)
+        if index < 0 or index >= per_tab * (1 + max_tab) then
+            return false
+        end
+        if index < per_tab then
+            return index < open_count
+        end
+        return has_token
+    end
     local item_list = session.GetEtcItemList(IT_ACCOUNT_WAREHOUSE)
     local guid_list = item_list:GetGuidList()
     local used = {}
     for i = 0, guid_list:Count() - 1 do
         local wh_item = item_list:GetItemByGuid(guid_list:Get(i))
         if wh_item then
-            if stackable and wh_item.type == cls_id then
+            if stackable and wh_item.type == cls_id and usable(wh_item.invIndex) then
                 return wh_item.invIndex
             end
             used[wh_item.invIndex] = true
         end
     end
-    local per_tab = account_warehouse.get_max_slot_per_tab()
-    local max_tab = account_warehouse.get_max_tab()
-    local open_count = session.barrack.GetMyAccount():GetAccountWarehouseSlotCount()
-    local has_token = session.loginInfo.IsPremiumState(ITEM_TOKEN) == true
     local now = imcTime.GetAppTime()
     g.awh_goal_hold = g.awh_goal_hold or {}
     for tab = max_tab, 0, -1 do
@@ -13215,7 +13468,7 @@ end
 function Sub_map_ON_CHALLENGE_MODE_TOTAL_KILL_COUNT(frame, msg)
     if g.sub_map_challenge_first == true and g.sub_map_challenge == 0 then
         g.sub_map_challenge = 1
-        Sub_map_frame_init()
+        Sub_map_frame_reinit()
         g.sub_map_challenge_first = false
     end
 end
@@ -13331,7 +13584,7 @@ function Sub_map_setting_change(parent, ctrl)
         end
     end
     Sub_map_save_settings()
-    Sub_map_frame_init()
+    Sub_map_frame_reinit()
 end
 
 function Sub_map_skin_change_context(frame, ctrl)
@@ -13349,7 +13602,14 @@ end
 function Sub_map_skin_change(skin_name)
     g.sub_map_settings.skin_name = skin_name
     Sub_map_save_settings()
-    Sub_map_frame_init()
+    Sub_map_frame_reinit()
+end
+
+-- 다시 그릴 때는 창을 지우고 새로 만든다. 남은 창 위에 그리면 정렬·여백이 겹쳐 처음 자리로 돌아갔다
+-- rebuild from scratch: drawing over the old frame stacked its layout and reset the position
+function Sub_map_frame_reinit()
+    ui.DestroyFrame(addon_name_lower .. "sub_map")
+    ReserveScript("Sub_map_frame_init()", 0.1)
 end
 
 function Sub_map_frame_init()
@@ -13362,10 +13622,22 @@ function Sub_map_frame_init()
     sub_map:EnableMove(g.sub_map_settings.move)
     sub_map:EnableHittestFrame(1)
     sub_map:SetTitleBarSkin("None")
-    sub_map:SetGravity(ui.RIGHT, ui.TOP)
-    sub_map:SetMargin(0, 0, 0, 0)
     local use_minimap = (challenge == 1 and g.sub_map_settings.challenge_minimap == 1) or
                             (challenge == 0 and g.sub_map_settings.minimap ~= 0)
+    sub_map:SetUserValue("MINIMAP", use_minimap and 1 or 0)
+    -- 0,0 은 "기본 자리"라는 뜻(창 위치 초기화). 예전에는 x·y 가 둘 다 0 이 아니어야 썼다
+    -- → 화면 왼쪽 끝/위쪽 끝에 붙여 두면(한쪽만 0) 저장값이 무시됐다
+    -- 0,0 means the default spot; a spot with only one zero axis used to be ignored
+    local has_pos = not use_minimap and not (g.sub_map_settings.x == 0 and g.sub_map_settings.y == 0)
+    -- 저장한 자리가 있으면 오른쪽 정렬·여백을 쓰지 않는다(왼쪽 위 기준 + SetPos).
+    -- 예전에는 오른쪽 정렬 + 여백 위에 SetPos 를 덧씌워, 다시 그릴 때 기본 자리로 돌아갔다
+    -- with a saved spot, skip the right-anchored margin layout and place by absolute position
+    if has_pos then
+        sub_map:SetGravity(ui.LEFT, ui.TOP)
+    else
+        sub_map:SetGravity(ui.RIGHT, ui.TOP)
+        sub_map:SetMargin(0, 0, 0, 0)
+    end
 
     local size = g.sub_map_settings.size
     if use_minimap then
@@ -13377,11 +13649,12 @@ function Sub_map_frame_init()
         sub_map:Resize(310, 350)
     else
         sub_map:SetLayerLevel(12)
-        local rect = sub_map:GetMargin()
-        sub_map:SetMargin(rect.left - rect.left, rect.top - rect.top + 50,
-            rect.right == 0 and rect.right + 550 or rect.right, rect.bottom)
-        if g.sub_map_settings.x ~= 0 and g.sub_map_settings.y ~= 0 then
+        if has_pos then
             sub_map:SetPos(g.sub_map_settings.x, g.sub_map_settings.y)
+        else
+            local rect = sub_map:GetMargin()
+            sub_map:SetMargin(rect.left - rect.left, rect.top - rect.top + 50,
+                rect.right == 0 and rect.right + 550 or rect.right, rect.bottom)
         end
     end
     sub_map:SetEventScript(ui.LBUTTONUP, "Sub_map_frame_end_drag")
@@ -13389,6 +13662,8 @@ function Sub_map_frame_init()
     AUTO_CAST(title)
     local map_real_name = GetClassByType("Map", g.map_id).Name
     title:SetText("{ol}{S12}" .. map_real_name)
+    -- 제목 글자가 드래그를 가로채지 않게 / the title text must not swallow the drag
+    title:EnableHitTest(0)
     if challenge == 0 and g.sub_map_settings.challenge_only == 1 then
         g.sub_map_settings.visible = 0
     end
@@ -13583,6 +13858,11 @@ end
 end]]
 
 function Sub_map_frame_end_drag(sub_map)
+    -- 미니맵 모드는 자리가 고정이다(여백으로 잡는다) → 거기서 끈 자리를 일반 모드 저장값에 덮어쓰지 않는다
+    -- minimap mode has a fixed spot: do not overwrite the normal-mode position with it
+    if sub_map:GetUserIValue("MINIMAP") == 1 then
+        return
+    end
     g.sub_map_settings.x = sub_map:GetX()
     g.sub_map_settings.y = sub_map:GetY()
     Sub_map_save_settings()
@@ -13595,7 +13875,7 @@ function Sub_map_frame_toggle(frame, ctrl)
         g.sub_map_settings.visible = 1
     end
     Sub_map_save_settings()
-    Sub_map_frame_init()
+    Sub_map_frame_reinit()
 end
 
 function Sub_map_frame_map_link(sub_map, gbox)
@@ -13618,8 +13898,7 @@ function Sub_map_mini_map(sub_map, gbox)
         g.sub_map_settings.minimap = 0
     end
     Sub_map_save_settings()
-    ui.DestroyFrame(addon_name_lower .. "sub_map")
-    ReserveScript("Sub_map_frame_init()", 0.1)
+    Sub_map_frame_reinit()
 end
 
 function Sub_map_frame_layer_change(sub_map, gbox, str)
@@ -13678,6 +13957,10 @@ end
 
 function Sub_map_timer_update(_nexus_addons, sub_map_timer)
     local sub_map = ui.GetFrame(addon_name_lower .. "sub_map")
+    -- 다시 그리는 동안(Sub_map_frame_reinit, 0.1초)에는 창이 없다 / the frame is gone while it is being rebuilt
+    if not sub_map then
+        return
+    end
     AUTO_CAST(sub_map)
     local challenge = sub_map:GetUserIValue("CHALLENGE")
     local use_minimap = (challenge == 1 and g.sub_map_settings.challenge_minimap == 1) or
@@ -16812,17 +17095,21 @@ end
 
 function Indun_list_viewer_enter_solo_or_auto(parent, ctrl, move_type_str, indun_type)
     local move_type = tonumber(move_type_str)
-    ReqRaidAutoUIOpen(indun_type)
     if move_type == 2 then
-        local indunenter = ui.GetFrame("indunenter")
-        local indun_cls = GetClassByType("Indun", indunenter:GetUserValue("INDUN_TYPE"))
-        local min_rank = TryGetProp(indun_cls, "PCRank")
+        -- ⚠️ 예전에는 방금 열라고 한 입장 창의 INDUN_TYPE 을 바로 읽었다 — 창이 아직 안 떴으면 이전 인던의
+        --    값이다. 누른 버튼의 인던 번호를 그대로 쓴다
+        -- use the clicked dungeon id; the entry window may still hold the previous one
+        local indun_cls = GetClassByType("Indun", indun_type)
+        local min_rank = indun_cls and TryGetProp(indun_cls, "PCRank")
         if min_rank and min_rank > session.GetPcTotalJobGrade() then
+            ReqRaidAutoUIOpen(indun_type)
             ui.SysMsg(ScpArgMsg("IndunEnterNeedPCRank", "NEED_RANK", min_rank))
             return
         end
     end
-    ReserveScript(string.format("ReqMoveToIndun(%d, 0)", move_type), 0.3)
+    -- 고정 0.3초 대기 대신 입장 진행기(창이 뜬 것을 보고 누른다). 이유는 Indun_panel_enter_solo 주석
+    -- the entry stepper instead of a fixed 0.3s wait (see Indun_panel_enter_solo)
+    Indun_panel_entry_start("raid", indun_type, move_type, "ui")
     local indun_list_viewer = parent:GetTopParentFrame()
     ui.DestroyFrame(indun_list_viewer:GetName())
 end
@@ -20446,6 +20733,15 @@ function Sub_slotset_update_contents(sub_slotset, data)
                 else
                     icon:SetColorTone('FFFF0000')
                     slot:SetText("{s15}{ol}{b}" .. 0, 'count', ui.RIGHT, ui.BOTTOM, -2, 1);
+                end
+                -- 🔴 툴팁은 등록한 그 아이템의 것을 보인다. 위의 SET_SLOT_ITEM_CLS 는 아이템 종류(클래스)의 툴팁을
+                --    건다 → 옵션이 아이템마다 다른 장비(귀걸이·아이커 등)는 실제 옵션이 아니라 종류 기본값이 보였다.
+                --    등록할 때 저장한 guid 로 그 아이템을 알 수 있으면 guid 툴팁으로 바꾼다. 모르면(팔았거나,
+                --    공유 슬롯셋을 다른 캐릭터로 보는 중) 종류 툴팁 그대로 둔다
+                -- show the registered item's own tooltip (by guid), not the item class's generic one
+                if iesid ~= nil and iesid ~= "" and iesid ~= "0" and GetObjectByGuid(iesid) ~= nil then
+                    icon:SetTooltipType("wholeitem")
+                    icon:SetTooltipArg("None", cls_id, iesid)
                 end
             elseif category == "Pose" then
                 local pose = GetClassByType('Pose', cls_id)
